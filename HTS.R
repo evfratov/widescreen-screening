@@ -139,7 +139,7 @@ citydb <- data.frame()
 cities <- levels(as.factor(selected$city))
 for (k in 1:ceiling(length(cities)/500)) {
   tmp <- cities[(1 + (k-1) * 500):(k * 500)]
-  download.file(paste0('https://api.vk.com/method/database.getCitiesById.xml?city_ids=', paste(tmp, collapse=',')), destfile=paste0('db/cities-', k, '-.txt'), method='wget')
+  download.file(paste0('https://api.vk.com/method/database.getCitiesById.xml?city_ids=', paste(tmp, collapse=',')), destfile=paste0('db/cities-', k, '.txt'), method='wget')
   xmldata <- xmlParse(paste0('db/cities-', k, '-.txt'))
   tmp <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
   if (nrow(citydb) == 0) {
@@ -246,11 +246,11 @@ selected$ngroups <- rep(0, nrow(selected))
 # список для данных групп
 extend[['gropus']] <- list()
 for (id in selected$uid) {
-  # загрузка информации о группе
+  # загрузка информации о группах
   Sys.sleep(0.3)
-  download.file(url = paste0('https://api.vk.com/method/groups.get.xml?user_id=', id, '&extended=1', '&access_token=', token), destfile = paste0('/tmp/groups', id), method='wget')
+  download.file(url = paste0('https://api.vk.com/method/groups.get.xml?user_id=', id, '&extended=1', '&access_token=', token), destfile = paste0('db/groups/groups-', id, '.txt'), method='wget')
   # парсинг XML
-  xmldata <- xmlParse(paste0('/tmp/groups', id))
+  xmldata <- xmlParse(paste0('db/groups/groups-', id, '.txt'))
   extend[['gropus']][[id]] <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
   if (ncol(extend[['gropus']][[id]]) != 1) {
     # убрать первый столбец и строку
@@ -262,8 +262,6 @@ for (id in selected$uid) {
   }
   # контрольный вывод
   print(paste(id, selected[selected$uid == id,]$ngroups))
-  # удаление
-  system(paste0('rm /tmp/groups/', id))
 }
 plot(table(sapply(extend[['gropus']], nrow)))
 
