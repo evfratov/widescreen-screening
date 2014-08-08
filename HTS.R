@@ -276,9 +276,9 @@ selected$Tsubs <- rep(0, nrow(selected))
 for (id in selected$uid) {
   # загрузка информации о подписках
   Sys.sleep(0.4)
-  file.create(paste0('/tmp/subs', id))
-  while (file.info(paste0('/tmp/subs', id))$size == 0) {
-    try(download.file(url = paste0('https://api.vk.com/method/users.getSubscriptions.xml?user_id=', id, '&access_token=', token), destfile = paste0('/tmp/subs', id), method='curl'))
+  file.create(paste0('db/subs', id))
+  while (file.info(paste0('db/subs', id))$size == 0) {
+    try(download.file(url = paste0('https://api.vk.com/method/users.getSubscriptions.xml?user_id=', id, '&access_token=', token), destfile = paste0('db/subs', id), method='curl'))
   }
   # парсинг XML
   xmldata <- xmlParse(paste0('/tmp/subs', id))
