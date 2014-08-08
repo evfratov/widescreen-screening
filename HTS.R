@@ -14,7 +14,7 @@ save.image('.RData')
 #target <- c('dreamtheater', 'bbcdoctorwho')
 target <- c('transhumanism_russia', 'transhumanist', 'transcyber', 'immortalism', 'thuman', 'kriorus2006')
 targets <- paste0(target, collapse = ' ')
-token <- '0905b120683061f39a84da4c845e650b513bf044269c439176537375b865aee0f12ac392701d4466fe92b9e5efe6d'
+token <- '28e5db3dacd2bd6cccb6fcfc33708c70a634c8e54d70c82d7ddad21187712979fd18451156d9a00a6868c5649703a'
 
 # Запуск!
 system(paste0('bash vkAutoSearch.bash \'', targets, '\' ', token))
@@ -248,9 +248,9 @@ extend[['gropus']] <- list()
 for (id in selected$uid) {
   # загрузка информации о группах
   Sys.sleep(0.3)
-  download.file(url = paste0('https://api.vk.com/method/groups.get.xml?user_id=', id, '&extended=1', '&access_token=', token), destfile = paste0('db/groups/groups-', id, '.txt'), method='wget')
+  download.file(url = paste0('https://api.vk.com/method/groups.get.xml?user_id=', id, '&extended=1', '&access_token=', token), destfile = paste0('/tmp/groups-', id, '.xml'), method='wget')
   # парсинг XML
-  xmldata <- xmlParse(paste0('db/groups/groups-', id, '.txt'))
+  xmldata <- xmlParse(paste0('/tmp/groups-', id, '.xml'))
   extend[['gropus']][[id]] <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
   if (ncol(extend[['gropus']][[id]]) != 1) {
     # убрать первый столбец и строку
@@ -262,6 +262,8 @@ for (id in selected$uid) {
   }
   # контрольный вывод
   print(paste(id, selected[selected$uid == id,]$ngroups))
+  # вывод в db
+  write.table(extend[['gropus']][[id]], paste0('db/groups/groups-', id, '.tab'), quote = F, sep = "\t", row.names = F, col.names = T)
 }
 plot(table(sapply(extend[['gropus']], nrow)))
 
@@ -276,9 +278,9 @@ selected$Tsubs <- rep(0, nrow(selected))
 for (id in selected$uid) {
   # загрузка информации о подписках
   Sys.sleep(0.4)
-  file.create(paste0('db/subs', id))
-  while (file.info(paste0('db/subs', id))$size == 0) {
-    try(download.file(url = paste0('https://api.vk.com/method/users.getSubscriptions.xml?user_id=', id, '&access_token=', token), destfile = paste0('db/subs', id), method='curl'))
+  file.create(paste0('/tmp/subs', id))
+  while (file.info(paste0('/tmp/subs', id))$size == 0) {
+    try(download.file(url = paste0('https://api.vk.com/method/users.getSubscriptions.xml?user_id=', id, '&access_token=', token), destfile = paste0('/tmp/subs', id), method='curl'))
   }
   # парсинг XML
   xmldata <- xmlParse(paste0('/tmp/subs', id))
@@ -320,6 +322,8 @@ for (id in selected$uid) {
   }
   system(paste0('rm /tmp/subsi', id, '*'))
   
+  # вывод данных
+  write.table(extend[['subs']][[id]], paste0('db/subs/subs-', id, '.tab'), quote = F, sep = "\t", row.names = F, col.names = T)
   # контрольный вывод
   print(paste(id, selected[selected$uid == id,]$nsubs, selected[selected$uid == id,]$Tsubs, round(which(selected$uid == id)/nrow(selected)*100, 1)))
   
@@ -401,6 +405,8 @@ for (id in selected$uid) {
     writeLines(as.vector(extend[['wall']][[id]]$comment), out)
     close(out)
   }
+  # удаление данных стены
+  extend[['wall']][[id]] <- ''
 }
 
 # коменты к фотографиям
