@@ -7,19 +7,13 @@ library(Rgraphviz)
 source("http://bioconductor.org/biocLite.R")
 
 setwd("~/Dropbox/evfr/HTS/")
-load(".RData")
-loadhistory(file = ".Rhistory")
 
 # стоп-слова
+### пока дефолтные для tm
 
-
-# анализ коментов
-fl <- file('db/walls/10086877.txt')
-tmp <- readLines(fl)
-close(fl)
-
+# парсинг библиотеки и получение списка TDM
 # сбор Corpus'а
-tcp <- Corpus(VectorSource(tmp))
+tcp <- Corpus(DirSource('db/walls/'))
 docs <- tm_map(tcp, PlainTextDocument)
 docs <- tm_map(docs, content_transformer(tolower)) # в нижний регистр
 docs <- tm_map(docs, content_transformer(function(x) str_replace_all(x, "<.+?>", " "))) # убрать всякий XML
@@ -29,10 +23,7 @@ docs <- tm_map(docs, removeNumbers) # удалить числа
 docs <- tm_map(docs, content_transformer(function(x) str_replace_all(x, "[a-z]{18,}", " "))) # убрать слова длиннее 20
 docs <- tm_map(docs, removeWords, stopwords('ru')) # удалить стоп-слова
 docs <- tm_map(docs, stripWhitespace) # сжать пробелы
-docs[[6]]
 
 # построение TDM
 docsTDM <- TermDocumentMatrix(docs)
-findFreqTerms(docsTDM, 5)
-
 

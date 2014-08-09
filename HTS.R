@@ -7,14 +7,11 @@ loadhistory(file = ".Rhistory")
 savehistory(file = ".Rhistory") ### Don't forget save history! ###
 save.image('.RData')
 
-# https://oauth.vk.com/authorize?client_id=4315528&scope=1326214&redirect_uri=https://oauth.vk.com/blank.html&display=page&v=5.21&response_type=token
-# 24 часа
-
 # набор целевых групп
 #target <- c('dreamtheater', 'bbcdoctorwho')
 target <- c('transhumanism_russia', 'transhumanist', 'transcyber', 'immortalism', 'thuman', 'kriorus2006')
 targets <- paste0(target, collapse = ' ')
-token <- '28e5db3dacd2bd6cccb6fcfc33708c70a634c8e54d70c82d7ddad21187712979fd18451156d9a00a6868c5649703a'
+token <- ''
 
 # Запуск!
 system(paste0('bash vkAutoSearch.bash \'', targets, '\' ', token))
@@ -91,38 +88,70 @@ selected$last_seen <- as.numeric(selected$last_seen) # преобразоват�
 selected <- selected[difftime(Sys.time(), as.POSIXct(selected$last_seen, origin='1970-01-01'), units='d') < 20,] # удалить неактивных в течении 20 дней
 selected <- selected[,!colnames(selected) == 'last_seen'] # удалить более не нужную колонку "last_seen"
 
-# отсечение по возрасту
+# конвертация bdate в возраст age
 selected$bdate <- as.character(as.Date(selected[,'bdate'], format='%d.%m.%Y')) # преобразование содержимого поля в даты
-subselected <- selected[!is.na(selected$bdate),] # разбить по определённой величине bdate
-selected <- selected[is.na(selected$bdate),] # ...и неопределённой
-subselected <- subselected[difftime(Sys.Date(), as.Date(subselected[,'bdate'], format='%Y-%m-%d'), units='d')/365 > 20,] # удалить моложе чем 20 лет если возраст не NA
-subselected <- subselected[difftime(Sys.Date(), as.Date(subselected[,'bdate'], format='%Y-%m-%d'), units='d')/365 < 25,] # удалить старше чем 25 лет если возраст не NA
-selected <- rbind(subselected, selected) # склеить обратно в целый датафрейм
-selected[is.na(selected$bdate), 'bdate'] <- 0 # заменить NA даты рождения на нули
+selected$age <- as.numeric(round(difftime(Sys.Date(), as.Date(selected[,'bdate'], format='%Y-%m-%d'), units='d')/365, 1)) # пересчёт в года
+selected <- selected[,!colnames(selected) == 'bdate'] # удаление более не нужной колонки bdate
 
-# реверсная оценка возраста
-subselected <- selected[selected$bdate == 0,] # выделить поднабор с неопределённым возрастом
+# отсечение по возрасту
+subselected <- selected[!is.na(selected$age),] # разбить по определённой величине bdate
+selected <- selected[is.na(selected$age),] # ...и неопределённой
+subselected <- subselected[subselected$age >= 20,] # удалить моложе чем 20 лет если возраст не NA
+subselected <- subselected[subselected$age <= 25,] # удалить старше чем 25 лет если возраст не NA
+selected <- rbind(subselected, selected) # склеить обратно в целый датафрейм
+selected[is.na(selected$age), 'age'] <- 0 # заменить NA даты рождения на нули
+
+### реверсная оценка возраста
+subselected <- selected[selected$age == 0,] # выделить поднабор с неопределённым возрастом
+
 # перебор всех пользователей по имени и фамилии в целевом диапазоне возраста
-in_normal_range <- c()
-for (n in seq(1, 20)) { # nrow(subselected)/10
-  f_name <- subselected[n,'first_name']
-  l_name <- subselected[n,'last_name']
+for (n in seq(1, nrow(subselected))) {
+  f_name <- subselected[n, 'first_name']
+  l_name <- subselected[n, 'last_name']
   uid <- subselected[n,'uid']
-  download.file(paste0('https://api.vk.com/method/users.search.xml?q=', f_name, ' ', l_name, '&count=1000', '&age_from=20&age_to=25', '&access_token=', token), destfile=paste0('/tmp/', uid, '.txt'), method='wget')
+  # проверка возраста на валидность
+  valid <- 0
+  file.create(paste0('/tmp/', uid, '.txt'))
+  while (file.info(paste0('/tmp/', uid, '.txt'))$size == 0) {
+    try(download.file(paste0('https://api.vk.com/method/users.search.xml?q=', f_name, ' ', l_name, '&count=1000', '&age_from=14&age_to=80', '&access_token=', token), destfile=paste0('/tmp/', uid, '.txt'), method='wget'))
+    Sys.sleep(0.35)
+  }
   tmp <- xmlParse(paste0('/tmp/', uid, '.txt'))
   tmp <- xmlToDataFrame(tmp)
   if (tmp[1,1] != 0) {
-    print(sum(tmp$uid %in% uid))
     if (sum(tmp$uid %in% uid) > 0) {
-      in_normal_range <- c(in_normal_range, uid)
+      valid <- 1
+      print(paste(uid, 'valid'))
     }
+  } else {
+    print(paste(uid, 'empty validation'))
   }
   system(paste0('rm /tmp/', uid, '.txt'))
-  Sys.sleep(0.3)
+
+  # проверка возраста на принадлежность 20 - 25
+  if (valid == 1) {
+  file.create(paste0('/tmp/', uid, '.txt'))
+    while (file.info(paste0('/tmp/', uid, '.txt'))$size == 0) {
+      try(download.file(paste0('https://api.vk.com/method/users.search.xml?q=', f_name, ' ', l_name, '&count=1000', '&age_from=20&age_to=25', '&access_token=', token), destfile=paste0('/tmp/', uid, '.txt'), method='wget'))
+      Sys.sleep(0.35)
+    }
+    tmp <- xmlParse(paste0('/tmp/', uid, '.txt'))
+    tmp <- xmlToDataFrame(tmp)
+    if (tmp[1,1] != 0) {
+      if (sum(tmp$uid %in% uid) > 0) {
+        print(paste(uid, 'in range'))
+      } else {
+        print(paste(uid, 'unmatch'))
+        selected[selected$uid != uid,]
+      }
+    } else {
+      print(paste(uid, 'empty etsimation'))
+      selected[selected$uid != uid,]
+    }
+    system(paste0('rm /tmp/', uid, '.txt'))
+
+  }
 }
-
-
-nrow(selected)
 
 # получение стран из базы данных Vk
 countries <- levels(as.factor(selected$country))
@@ -162,9 +191,6 @@ selected[is.na(selected$faculty_name), 'faculty_name'] <- 0
 # замена пустых имён на 0 для упрощения работы
 selected[selected$university_name == '', 'university_name'] <- 0
 selected[selected$faculty_name == '', 'faculty_name'] <- 0
-
-# удалить тех, кто без фото
-selected <- selected[!(selected$photo_max_orig == 'http://vk.com/images/camera_a.gif'),]
 
 ### ### вывод конечных результатов в табличный файл
 write.table(file='HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=F)
@@ -265,7 +291,10 @@ for (id in selected$uid) {
   # вывод в db
   write.table(extend[['gropus']][[id]], paste0('db/groups/groups-', id, '.tab'), quote = F, sep = "\t", row.names = F, col.names = T)
 }
-plot(table(sapply(extend[['gropus']], nrow)))
+
+### анализ групп
+
+
 
 # подписки
 # список для данных подписок
@@ -329,19 +358,11 @@ for (id in selected$uid) {
   
 }
 
-# ## Получение объединённого датафрейма всех групп
-# tmp <- data.frame()
-# for (name in names(extend[['gropus']])) {
-#   if (ncol(extend[['gropus']][[name]]) == 3) {
-#     if (nrow(tmp) == 0) {
-#       tmp <- extend[['gropus']][[name]]
-#     } else {
-#       tmp <- rbind(extend[['gropus']][[name]], tmp)
-#     }
-#   }
-# }
-# tmp <- unique(tmp)
-# write.table(tmp, 'db/groupScore.tab', quote = F, sep = "\t", row.names = F, col.names = T)
+### контроль степени идеологичости
+### прежде чем анализировать данные коментов
+selected$NTC <- log((selected$Tcoeff + selected$Tsubs)/(selected$ngroups + selected$nsubs)) + 5
+# слишком большие отклонения от положительных контролей, метод пока не применим
+
 
 # стена
 # список для данных стены
