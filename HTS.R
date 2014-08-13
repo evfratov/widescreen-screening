@@ -1,31 +1,50 @@
 library(XML)
-library(tm)
-setwd("~/Dropbox/evfr/HTS/")
-load(".RData")
-loadhistory(file = ".Rhistory")
 
-savehistory(file = ".Rhistory") ### Don't forget save history! ###
-save.image('.RData')
+setwd("~/Dropbox/evfr/HTS/")
+#load(".RData")
+#loadhistory(file = ".Rhistory")
+
+#savehistory(file = ".Rhistory") ### Don't forget save history! ###
+#save.image('.RData')
+
+# токен
+token <- 'dbb490afcb3b4313a7e5831bed7c1b755b6f3fc52f08f70f03b10243529828f3059240c55e8c87ac5e123a6b005a8'
 
 # набор целевых групп
-#target <- c('dreamtheater', 'bbcdoctorwho')
-target <- c('transhumanism_russia', 'transhumanist', 'transcyber', 'immortalism', 'thuman', 'kriorus2006')
-targets <- paste0(target, collapse = ' ')
-token <- ''
+targets <- c('transhumanism_russia', 'transhumanist', 'transcyber', 'immortalism', 'thuman', 'kriorus2006')
+# возраст
+minAge <- 21
+maxAge <- 25
+# пол
+sex <- 'F'
+# срок активности, дни
+activity <- 20
+
 
 # Запуск!
-system(paste0('bash vkAutoSearch.bash \'', targets, '\' ', token))
-
-## выбор режима - "все группы вместе" или "любая группа"
-#mode <- 'OR' # может быть 'AND' или 'OR'
+for (target in targets) {
+  print(paste('  Group:  ', target))
+  Sys.sleep(0.4)
+  download.file(paste0('https://api.vk.com/method/groups.getById.xml?group_id=', target, '&fields=members_count'), destfile=paste0('/tmp/',target, '.txt'), method='wget', quiet = T)
+  tmp <- readLines(paste0('/tmp/',target, '.txt'))
+  tmp <- grep('members_count>', tmp, value = T)
+  member_count <- as.integer(gsub('(( )+)?<.+?>', '', tmp))
+  print(paste('    members  ', member_count))
+  system(paste0('rm /tmp/',target, '.txt'))
+  stepSize <- as.integer(member_count / 1000)
+  for (s in seq(0, stepSize)) {
+    Sys.sleep(0.4)
+    download.file(paste0('https://api.vk.com/method/groups.getMembers.xml?group_id=', target, '&offset=', s * 1000,'&fields=sex,bdate,city,country,education,last_seen,relation&access_token=', token), destfile = paste0('/tmp/vkDB-', s, '-',target, '.xml'), method = 'wget', quiet = T)
+  }
+}
 
 # парсинг сырых XML-данных
 usersdata <- list()
-for (group in target) {
+for (group in targets) {
   usersdata[[group]] <- data.frame()
   print(paste('parsing group:', group))
-  for (filename in list.files(pattern = paste0('*-', group, '.txt'))) {
-    xmldata <- xmlParse(filename)
+  for (filename in list.files('/tmp/', pattern = paste0('*-', group, '.xml'))) {
+    xmldata <- xmlParse(paste0('/tmp/', filename))
     print(paste("  parsing", filename))
     tmp <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)[['users']]))
     if (nrow(usersdata[[group]]) == 0) {
@@ -49,6 +68,7 @@ for (group in names(usersdata)) {
   }
 }
 nrow(vkdata)
+rm(usersdata)
 
 # вычисление Tcoeff
 tmp <- as.vector(table(vkdata$uid)[vkdata$uid])
@@ -61,7 +81,9 @@ vkdata <- vkdata[!duplicated(vkdata$uid),]
 vkdata <- vkdata[,!(colnames(vkdata) %in% c('type', 'university', 'faculty', 'education_form', 'education_status', 'graduation'))]
 
 # первичная фильтрация
-selected <- vkdata[vkdata$sex == 1,] # оставить только женский пол
+gender <- c(0, 1)
+names(gender) <- c('M', 'F')
+selected <- vkdata[vkdata$sex == gender[[sex]],] # оставить только женский пол
 selected <- selected[,!colnames(selected) == 'sex'] # убрать ненужную уже колонку про пол
 selected <- selected[is.na(selected$deactivated),] # выбрать не забаненных и не заблокированных
 selected <- selected[,!colnames(selected) == 'deactivated'] # удалить колонку 'deactivated'
@@ -74,7 +96,6 @@ selected <- selected[,!colnames(selected) == 'deactivated'] # удалить к�
 # 5 – it's complicated
 # 6 – actively searching
 # 7 – in love
-
 # удалить типы 2, 3, 4 и 7
 selected <- selected[!selected$relation %in% c(2,3,4,7),]
 selected <- selected[is.na(selected$relation_partner),] # удалить тех, у кого есть тот, с кем сложно
@@ -85,7 +106,7 @@ selected[is.na(selected$relation), 'relation'] <- 0 # заменить стат�
 removeLast <- function(x) { substr(x, 1, nchar(x)-1) } # создать функциб для отрезания номера платформы от даты last_seen
 selected$last_seen <- removeLast(selected$last_seen) # удалить номер платформы от last_seen
 selected$last_seen <- as.numeric(selected$last_seen) # преобразовать last_seen UNIX-time в число
-selected <- selected[difftime(Sys.time(), as.POSIXct(selected$last_seen, origin='1970-01-01'), units='d') < 20,] # удалить неактивных в течении 20 дней
+selected <- selected[difftime(Sys.time(), as.POSIXct(selected$last_seen, origin='1970-01-01'), units='d') < activity,] # удалить неактивных в течении 20 дней
 selected <- selected[,!colnames(selected) == 'last_seen'] # удалить более не нужную колонку "last_seen"
 
 # конвертация bdate в возраст age
@@ -96,67 +117,15 @@ selected <- selected[,!colnames(selected) == 'bdate'] # удаление бол�
 # отсечение по возрасту
 subselected <- selected[!is.na(selected$age),] # разбить по определённой величине bdate
 selected <- selected[is.na(selected$age),] # ...и неопределённой
-subselected <- subselected[subselected$age >= 20,] # удалить моложе чем 20 лет если возраст не NA
-subselected <- subselected[subselected$age <= 25,] # удалить старше чем 25 лет если возраст не NA
+subselected <- subselected[subselected$age >= minAge,] # удалить моложе чем minAge лет если возраст не NA
+subselected <- subselected[subselected$age <= maxAge,] # удалить старше чем maxAge лет если возраст не NA
 selected <- rbind(subselected, selected) # склеить обратно в целый датафрейм
 selected[is.na(selected$age), 'age'] <- 0 # заменить NA даты рождения на нули
 
-### реверсная оценка возраста
-subselected <- selected[selected$age == 0,] # выделить поднабор с неопределённым возрастом
-
-# перебор всех пользователей по имени и фамилии в целевом диапазоне возраста
-for (n in seq(1, nrow(subselected))) {
-  f_name <- subselected[n, 'first_name']
-  l_name <- subselected[n, 'last_name']
-  uid <- subselected[n,'uid']
-  # проверка возраста на валидность
-  valid <- 0
-  file.create(paste0('/tmp/', uid, '.txt'))
-  while (file.info(paste0('/tmp/', uid, '.txt'))$size == 0) {
-    try(download.file(paste0('https://api.vk.com/method/users.search.xml?q=', f_name, ' ', l_name, '&count=1000', '&age_from=14&age_to=80', '&access_token=', token), destfile=paste0('/tmp/', uid, '.txt'), method='wget'))
-    Sys.sleep(0.35)
-  }
-  tmp <- xmlParse(paste0('/tmp/', uid, '.txt'))
-  tmp <- xmlToDataFrame(tmp)
-  if (tmp[1,1] != 0) {
-    if (sum(tmp$uid %in% uid) > 0) {
-      valid <- 1
-      print(paste(uid, 'valid'))
-    }
-  } else {
-    print(paste(uid, 'empty validation'))
-  }
-  system(paste0('rm /tmp/', uid, '.txt'))
-
-  # проверка возраста на принадлежность 20 - 25
-  if (valid == 1) {
-  file.create(paste0('/tmp/', uid, '.txt'))
-    while (file.info(paste0('/tmp/', uid, '.txt'))$size == 0) {
-      try(download.file(paste0('https://api.vk.com/method/users.search.xml?q=', f_name, ' ', l_name, '&count=1000', '&age_from=20&age_to=25', '&access_token=', token), destfile=paste0('/tmp/', uid, '.txt'), method='wget'))
-      Sys.sleep(0.35)
-    }
-    tmp <- xmlParse(paste0('/tmp/', uid, '.txt'))
-    tmp <- xmlToDataFrame(tmp)
-    if (tmp[1,1] != 0) {
-      if (sum(tmp$uid %in% uid) > 0) {
-        print(paste(uid, 'in range'))
-      } else {
-        print(paste(uid, 'unmatch'))
-        selected[selected$uid != uid,]
-      }
-    } else {
-      print(paste(uid, 'empty etsimation'))
-      selected[selected$uid != uid,]
-    }
-    system(paste0('rm /tmp/', uid, '.txt'))
-
-  }
-}
-
 # получение стран из базы данных Vk
 countries <- levels(as.factor(selected$country))
-download.file(paste0('https://api.vk.com/method/database.getCountriesById.xml?country_ids=', paste(countries, collapse=',')), destfile='db/countries.txt', method='wget')
-xmldata <- xmlParse('db/countries.txt')
+download.file(paste0('https://api.vk.com/method/database.getCountriesById.xml?country_ids=', paste(countries, collapse=',')), destfile='/tmp/countries.txt', method='wget')
+xmldata <- xmlParse('/tmp/countries.txt')
 countidb <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
 # замещение индексных номеров стран на нормальные названия
 for (country in levels(countidb$cid) ) {
@@ -168,8 +137,9 @@ citydb <- data.frame()
 cities <- levels(as.factor(selected$city))
 for (k in 1:ceiling(length(cities)/500)) {
   tmp <- cities[(1 + (k-1) * 500):(k * 500)]
-  download.file(paste0('https://api.vk.com/method/database.getCitiesById.xml?city_ids=', paste(tmp, collapse=',')), destfile=paste0('db/cities-', k, '.txt'), method='wget')
-  xmldata <- xmlParse(paste0('db/cities-', k, '-.txt'))
+  Sys.sleep(0.4)
+  download.file(paste0('https://api.vk.com/method/database.getCitiesById.xml?city_ids=', paste(tmp, collapse=',')), destfile=paste0('/tmp/cities-', k, '.txt'), method='wget')
+  xmldata <- xmlParse(paste0('/tmp/cities-', k, '.txt'))
   tmp <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
   if (nrow(citydb) == 0) {
     citydb <- tmp
@@ -193,244 +163,5 @@ selected[selected$university_name == '', 'university_name'] <- 0
 selected[selected$faculty_name == '', 'faculty_name'] <- 0
 
 ### ### вывод конечных результатов в табличный файл
-write.table(file='HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=F)
+write.table(file='HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
 
-
-### ### Статистический анализ
-nrow(selected) # сколько всего
-sum(selected$country == 0) # 10% не указали страну, - очень низкоприротетно, бинарный есть - нет
-sum(selected$university_name == 0) # 80% не указали - низкоприротетно, бинарный есть - нет
-sum(selected$bdate == 0) # 80% без даты рождения - средний критерий приоритета, бинарный нет - есть
-sum(selected$city == 0) # 20% не указали город - важный критерий наличия и очень важдый критерий по COI (города интереса), тринарный нет - есть - COI
-table(selected$relation) # 90% не указали статус, не single у 1,35% - главный критерий приоритета, бинарный 0|1 - 5|6
-
-### категоризация
-# итого: university_name bdate city+city_u_COI relation
-# вычисление рейтинга:
-# country 1
-# university_name 2
-# bdate 2
-# city 2
-# city_u_COI 10
-# relation 20
-# задание Городов Интереса
-coi <- c('Москва', 'Нижний Новгород', 'Ижевск', 'Тольятти', 'Сарапул')
-# новая колонка для рейтинга
-score <- rep(0, nrow(selected))
-selected <- cbind(selected, score)
-# оценка
-for (i in 1:nrow(selected)) {
-  tmp <- selected[i,]
-  # учёт country
-  if (tmp$city != 0) { selected[i,'score'] <- selected[i,'score'] + 1 }
-  # учёт university_name
-  if (tmp$university_name != 0) { selected[i,'score'] <- selected[i,'score'] + 2 }
-  # учёт bdate
-  if (tmp$bdate != 0) { selected[i,'score'] <- selected[i,'score'] + 2 }
-  # учёт city
-  if (tmp$city != 0) { selected[i,'score'] <- selected[i,'score'] + 2 }
-  # учёт city_u_COI
-  if (tmp$city %in% coi) { selected[i,'score'] <- selected[i,'score'] + 10 }
-  # учёт relation
-  if (tmp$relation > 1) { selected[i,'score'] <- selected[i,'score'] + 20 }
-}
-# exploratory plot
-plot(table(selected$score), ylab = 'Count', xlab = 'Score')
-
-# разбивка на 3 приоритета до 8, после 8 и до 20, с 20
-minim <- 8
-maxim <- 20
-abline(v = minim, col = 'blue', lwd = 2)
-abline(v = maxim, col = 'red', lwd = 2)
-priority <- list()
-priority[['low']] <- selected[selected$score < minim,]
-priority[['mid']] <- selected[(selected$score >= minim) & (selected$score < maxim),]
-priority[['high']] <- selected[selected$score >= maxim,]
-# итоговая статистика
-sapply(priority, nrow)
-
-# вывод приоритетных данных
-for (name in names(priority)) {
- filename <- paste0('PriorityList_', name, '.tab')
- write.table(priority[[name]], filename, sep = "\t", quote = F, row.names = F, col.names = T)
-}
-
-# ### пакетная загрузка фотографий
-# # последовательная загрузка фотографии типа 'photo_max_orig'
-# for (n in 1:nrow(priority[['high']])) {
-#    download.file(url=priority[['high']][n,'photo_max_orig'], destfile=paste0('photos_high/', priority[['high']][n,'uid'], '_', priority[['high']][n,'first_name'], '-', priority[['high']][n,'last_name'], '.jpg'), method='curl')
-# }
-
-
-### расширенный анализ данных пользователей
-# хранилище расширенных данных
-extend <- list()
-# число групп
-selected$ngroups <- rep(0, nrow(selected))
-
-### группы
-# список для данных групп
-extend[['gropus']] <- list()
-for (id in selected$uid) {
-  # загрузка информации о группах
-  Sys.sleep(0.3)
-  download.file(url = paste0('https://api.vk.com/method/groups.get.xml?user_id=', id, '&extended=1', '&access_token=', token), destfile = paste0('/tmp/groups-', id, '.xml'), method='wget')
-  # парсинг XML
-  xmldata <- xmlParse(paste0('/tmp/groups-', id, '.xml'))
-  extend[['gropus']][[id]] <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
-  if (ncol(extend[['gropus']][[id]]) != 1) {
-    # убрать первый столбец и строку
-    extend[['gropus']][[id]] <- extend[['gropus']][[id]][-1,-1]
-    # оставить только первые 3 столбца
-    extend[['gropus']][[id]] <- extend[['gropus']][[id]][,1:3]
-    # записать число групп в ngroups
-    selected[selected$uid == id,]$ngroups <- nrow(extend[['gropus']][[id]])
-  }
-  # контрольный вывод
-  print(paste(id, selected[selected$uid == id,]$ngroups))
-  # вывод в db
-  write.table(extend[['gropus']][[id]], paste0('db/groups/groups-', id, '.tab'), quote = F, sep = "\t", row.names = F, col.names = T)
-}
-
-### анализ групп
-
-
-
-# подписки
-# список для данных подписок
-extend[['subs']] <- list()
-# число подписок
-selected$nsubs <- rep(0, nrow(selected))
-# число T-подписок
-selected$Tsubs <- rep(0, nrow(selected))
-
-for (id in selected$uid) {
-  # загрузка информации о подписках
-  Sys.sleep(0.4)
-  file.create(paste0('/tmp/subs', id))
-  while (file.info(paste0('/tmp/subs', id))$size == 0) {
-    try(download.file(url = paste0('https://api.vk.com/method/users.getSubscriptions.xml?user_id=', id, '&access_token=', token), destfile = paste0('/tmp/subs', id), method='curl'))
-  }
-  # парсинг XML
-  xmldata <- xmlParse(paste0('/tmp/subs', id))
-  
-  if (xmlToDataFrame(getNodeSet(xmldata, '//groups/count'))[1,] != 0) {
-    # продолжение парсинга XML
-    extend[['subs']][[id]] <- xmlToDataFrame(xmlRoot(xmldata)[['groups']][['items']])
-    colnames(extend[['subs']][[id]]) <- 'subid'
-    # посчитать число подписок
-    selected[selected$uid == id,]$nsubs <- nrow(extend[['subs']][[id]])
-    # сохранить список групп
-    groups <- as.vector(extend[['subs']][[id]]$subid)
-    # затереть датафрейм
-    extend[['subs']][[id]] <- data.frame()
-    # получение имён групп
-    for (k in 1:ceiling(length(groups)/200)) {
-      tmp <- groups[(1 + (k-1) * 200):(k * 200)]
-      tmp <- na.omit(tmp)
-      Sys.sleep(0.4)
-      file.create(paste0('/tmp/subsi', id, '-', k))
-      while (file.info(paste0('/tmp/subsi', id, '-', k))$size == 0) {
-        try(download.file(url = paste0('https://api.vk.com/method/groups.getById.xml?group_ids=', paste0(tmp, collapse = ','), '&access_token=', token), destfile = paste0('/tmp/subsi', id, '-', k), method='wget'))
-      }
-      # парсинг XML
-      xmldatasub <- xmlParse(paste0('/tmp/subsi', id, '-', k))
-      tmp <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldatasub)))
-      # отбор только ключевой информации
-      tmp <- tmp[,1:3]
-      if (nrow(extend[['subs']][[id]]) == 0) {
-        # сохранение в расширенный датафрейм
-        extend[['subs']][[id]] <- tmp
-      } else {
-        extend[['subs']][[id]] <- rbind(extend[['subs']][[id]], tmp)
-      }
-    }
-    
-    # посчитать число Т-подписок
-    selected[selected$uid == id,]$Tsubs <- sum(extend[['subs']][[id]]$screen_name %in% target)
-  }
-  system(paste0('rm /tmp/subsi', id, '*'))
-  
-  # вывод данных
-  write.table(extend[['subs']][[id]], paste0('db/subs/subs-', id, '.tab'), quote = F, sep = "\t", row.names = F, col.names = T)
-  # контрольный вывод
-  print(paste(id, selected[selected$uid == id,]$nsubs, selected[selected$uid == id,]$Tsubs, round(which(selected$uid == id)/nrow(selected)*100, 1)))
-  
-}
-
-### контроль степени идеологичости
-### прежде чем анализировать данные коментов
-selected$NTC <- log((selected$Tcoeff + selected$Tsubs)/(selected$ngroups + selected$nsubs)) + 5
-# слишком большие отклонения от положительных контролей, метод пока не применим
-
-
-# стена
-# список для данных стены
-extend[['wall']] <- list()
-for (id in selected$uid) {
-  # загрузка информации о стене - посчёт числа коментов
-  Sys.sleep(0.4)
-  file.create(paste0('/tmp/wall', id))
-  while (file.info(paste0('/tmp/wall', id))$size == 0) {
-    try(download.file(url = paste0('https://api.vk.com/method/wall.get.xml?owner_id=', id, '&count=1', '&filter=owner', '&access_token=', token), destfile = paste0('/tmp/wall', id), method='curl'))
-  } 
-  # парсинг пробного XML
-  xmldata <- xmlParse(paste0('/tmp/wall', id))
-  # подсчёт числа коментов
-  ncomments <- as.vector(xmlToDataFrame(getNodeSet(xmldata, '//response/count'))[1,1])
-  
-  # получение всех коментов
-  if (!is.null(ncomments)) {
-    ncomments <- as.numeric(ncomments)
-    for (k in 1:ceiling(ncomments/100)) {
-      Sys.sleep(0.4)
-      file.create(paste0('/tmp/wall', id, '-', k))
-      while (file.info(paste0('/tmp/wall', id, '-', k))$size == 0) {
-        try(download.file(url = paste0('https://api.vk.com/method/wall.get.xml?owner_id=', id, '&count=100', '&filter=owner', '&offset=', (k-1) * 100, '&access_token=', token), destfile = paste0('/tmp/wall', id, '-', k), method='curl'))
-      }
-      # парсинг основного XML
-      xmldata <- xmlParse(paste0('/tmp/wall', id, '-', k))
-      tmp <- sapply(getNodeSet(xmldata, '//response/post/text'), xmlValue)
-      # удалить коменты без текста
-      tmp <- tmp[tmp != '']
-      # проверить что в блоке вообще есть коменты с текстом
-      if (length(tmp) != 0) {
-        tmp <- as.data.frame(tmp)
-        colnames(tmp) <- 'comment'
-        # запись в расширенный датафрейм
-        if (is.null(extend[['wall']][[id]])) {
-         extend[['wall']][[id]] <- tmp
-        } else {
-         extend[['wall']][[id]] <- rbind(extend[['wall']][[id]], tmp)
-        }
-      }
-    }
-    system(paste0('rm /tmp/wall', id, '*'))
-    
-    # забив если коментов 0
-    if (ncomments == 0 | is.null(extend[['wall']][[id]])) {
-      extend[['wall']][[id]] <- data.frame()
-    }
-    
-    # контрольный вывод
-    print(paste(id, ncomments, nrow(extend[['wall']][[id]])))
-  } else {
-    # забив если проблемы с получением коментов
-    extend[['wall']][[id]] <- data.frame()
-  }
-    
-  # вывод в библиотеку файлов
-  if (nrow(extend[['wall']][[id]]) != 0) {
-#    file.create(paste0('db/walls/', id, '.txt'))
-    out <- file(paste0('db/walls/', id, '.txt'), open = 'w')
-    writeLines(as.vector(extend[['wall']][[id]]$comment), out)
-    close(out)
-  }
-  # удаление данных стены
-  extend[['wall']][[id]] <- ''
-}
-
-# коменты к фотографиям
-
-
-# curl 'http://api.vk.com/method/photos.get.xml?owner_id=9489198&album_id=profile&rev=1&count=1'
