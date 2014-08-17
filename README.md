@@ -18,4 +18,8 @@ Instructions:
 
 * Data for groups, subscriptions and wall comments now is not analysing (exclude T-coefficient), you can analyse this data by any methods.
 
+Workflow:
+
+HTS -> CaptureGroupsSubs -> CorrelateGroupsSubsAnalyse -> ReversAgeEstimate -> WallDownload -> TMcomments
+
 WORK IN PROGRESS

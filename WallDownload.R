@@ -1,7 +1,7 @@
 # Start only with HTS.R !!!
 
 # для точности прочитать файл вывода ещё раз
-# selected <- read.table('HTS.tab', header = T, stringsAsFactors = F)
+# selected <- read.table('data/HTS.tab', header = T, stringsAsFactors = F)
 
 
 ### ### стена
@@ -68,4 +68,4 @@ for (id in selected$uid) {
 save.image('.WallDownload')
 
 ### ### вывод конечных результатов в табличный файл
-write.table(file='HTS-full.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
+write.table(file='data/HTS-full.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)

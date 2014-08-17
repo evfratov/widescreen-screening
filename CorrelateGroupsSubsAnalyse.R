@@ -1,7 +1,7 @@
 # Start only with HTS.R !!!
 
 # для точности прочитать файлы вывода ещё раз
-# selected <- read.table('HTS.tab', header = T, stringsAsFactors = F)
+# selected <- read.table('data/HTS-full.tab', header = T, stringsAsFactors = F)
 
 #load('.CorrDat')
 
@@ -26,4 +26,4 @@ for (uid in names(CorrData[['groups']])) {
 
 
 
-write.table(GroupOccurMtx, 'GroupOccurenceMtx.tab', quote = T, sep = "\t", row.names = T, col.names = T)
+write.table(GroupOccurMtx, 'data/GroupOccurenceMtx.tab', quote = T, sep = "\t", row.names = T, col.names = T)

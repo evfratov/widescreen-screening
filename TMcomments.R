@@ -18,11 +18,11 @@ Twords <- c('трансгуман', 'имортали', 'крион', 'бесм�
 
 ### парсинг библиотеки и получение списка TDM
 # сбор Corpus'а
-tcp <- Corpus(DirSource('/media/data/temp/'))
+docs <- Corpus(DirSource('/media/data/WSS_Wall_DB/'))
 # подготовка для преобразований содержимого
-docs <- tm_map(tcp, PlainTextDocument)
+docs <- tm_map(docs, PlainTextDocument)
 # именование
-uidnames <- gsub('.txt', '', gsub('\\/.+\\/', '', DirSource('/media/data/temp/')$filelist))
+uidnames <- gsub('vkDB-walls-', '', gsub('.txt', '', gsub('\\/.+\\/', '', DirSource('/media/data/WSS_Wall_DB')$filelist)))
 names(docs) <- uidnames
 # преобразования текста
 docs <- tm_map(docs, content_transformer(tolower)) # в нижний регистр
@@ -41,8 +41,12 @@ docs <- tm_map(docs, content_transformer(function(x) str_replace_all(x, " [a-zа
 docs <- tm_map(docs, stripWhitespace) # сжать пробелы
 # построение TDM
 TDM <- DocumentTermMatrix(docs)
-# сжатие TDM, удалить термин реже каждого сотого
-TDM <-removeSparseTerms(TDM, 0.99)
+# сжатие TDM, удалить термин реже каждого 200
+TDM <-removeSparseTerms(TDM, 0.995)
+
+# взятие TDM только для Т-терминов
+TTDM <- inspect(TDM[, Terms(TDM)[grep(paste0(Twords, collapse = '|'), Terms(TDM))]])
+
 
 # взятие хоть сколько-то частых, намер термин в каждом nGrad-ном документе
 nGrad <- 20
@@ -52,8 +56,5 @@ uTDM <- removeSparseTerms(sTDM, 0.5)
 
 nTDM <- removeSparseTerms(uTDM, 0.1)
 heatmap(log(t(as.matrix(nTDM))+1), scale = 'col')
-
-
-
 
 inspect(TDM[1, 1:20])

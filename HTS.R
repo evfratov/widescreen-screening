@@ -1,11 +1,6 @@
 library(XML)
 
 setwd("~/Dropbox/evfr/HTS/")
-#load(".RData")
-#loadhistory(file = ".Rhistory")
-
-#savehistory(file = ".Rhistory") ### Don't forget save history! ###
-#save.image('.RData')
 
 # токен
 token <- 'dbb490afcb3b4313a7e5831bed7c1b755b6f3fc52f08f70f03b10243529828f3059240c55e8c87ac5e123a6b005a8'
@@ -163,5 +158,5 @@ selected[selected$university_name == '', 'university_name'] <- 0
 selected[selected$faculty_name == '', 'faculty_name'] <- 0
 
 ### ### вывод конечных результатов в табличный файл
-write.table(file='HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
+write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
 
