@@ -1,7 +1,7 @@
 # Start only with HTS.R !!!
 
 # для точности прочитать файлы вывода ещё раз
-# selected <- read.table('data/HTS-full.tab', header = T, stringsAsFactors = F)
+# selected <- read.table('data/HTS-full-RAE.tab', header = T, stringsAsFactors = F)
 
 #load('.CorrDat')
 
@@ -24,6 +24,8 @@ for (uid in names(CorrData[['groups']])) {
   GroupOccurMtx[user_groups,uid] <- 1
 }
 
-
+GOMRAE <- GroupOccurMtx[,gsub('id', '', colnames(GroupOccurMtx)) %in% selected$uid]
+GOMRAE <- GOMRAE[rowSums(GOMRAE) > 0,]
 
 write.table(GroupOccurMtx, 'data/GroupOccurenceMtx.tab', quote = T, sep = "\t", row.names = T, col.names = T)
+write.table(GOMRAE, 'data/GroupOccurenceMtx-RAE.tab', quote = T, sep = "\t", row.names = T, col.names = T)

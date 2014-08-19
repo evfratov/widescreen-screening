@@ -1,10 +1,8 @@
 library(XML)
 
 setwd("~/Dropbox/evfr/HTS/")
-
 # токен
-token <- 'dbb490afcb3b4313a7e5831bed7c1b755b6f3fc52f08f70f03b10243529828f3059240c55e8c87ac5e123a6b005a8'
-
+token <- ''
 # набор целевых групп
 targets <- c('transhumanism_russia', 'transhumanist', 'transcyber', 'immortalism', 'thuman', 'kriorus2006')
 # возраст
