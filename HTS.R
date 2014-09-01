@@ -1,10 +1,10 @@
 library(XML)
+library(rjson)
+library(plyr)
 
 setwd("~/Dropbox/evfr/HTS/")
-# токен
-token <- ''
-# набор целевых групп
-targets <- c('transhumanism_russia', 'transhumanist', 'transcyber', 'immortalism', 'thuman', 'kriorus2006')
+load('.RData')
+
 # возраст
 minAge <- 21
 maxAge <- 25
@@ -13,70 +13,100 @@ sex <- 'F'
 # срок активности, дни
 activity <- 20
 
+# набор целевых групп
+groupsDB <- read.table('db/groupsDB.tab', header = T, stringsAsFactors = F)
+targets <- groupsDB$group
+# категория 
+targetCategory <- 'N'
+# идеология
+ideology <- 'трансгуманизм'
 
-# Запуск!
+# bulk data members download
 for (target in targets) {
   print(paste('  Group:  ', target))
-  Sys.sleep(0.4)
-  download.file(paste0('https://api.vk.com/method/groups.getById.xml?group_id=', target, '&fields=members_count'), destfile=paste0('/tmp/',target, '.txt'), method='wget', quiet = T)
-  tmp <- readLines(paste0('/tmp/',target, '.txt'))
-  tmp <- grep('members_count>', tmp, value = T)
-  member_count <- as.integer(gsub('(( )+)?<.+?>', '', tmp))
+  Sys.sleep(0.5)
+  download.file(paste0('https://api.vk.com/method/groups.getById?group_id=', target, '&fields=members_count'), destfile=paste0('/tmp/', target, '.txt'), method='wget', quiet = T)
+  tmp_file <- paste0('/tmp/',target, '.txt')
+  tmp <- fromJSON(file = tmp_file)
+  member_count <- tmp$response[[1]]$members_count
   print(paste('    members  ', member_count))
-  system(paste0('rm /tmp/',target, '.txt'))
+  system(paste0('rm /tmp/', target, '.txt'))
   stepSize <- as.integer(member_count / 1000)
   for (s in seq(0, stepSize)) {
-    Sys.sleep(0.4)
-    download.file(paste0('https://api.vk.com/method/groups.getMembers.xml?group_id=', target, '&offset=', s * 1000,'&fields=sex,bdate,city,country,education,last_seen,relation&access_token=', token), destfile = paste0('/tmp/vkDB-', s, '-',target, '.xml'), method = 'wget', quiet = T)
+    Sys.sleep(0.5)
+    download.file(paste0('https://api.vk.com/method/groups.getMembers?group_id=', target, '&offset=', s * 1000,'&fields=sex,bdate,city,country,education,last_seen,relation&access_token=', token), destfile = paste0('/tmp/vkDB-', s, '-', target, '.txt'), method = 'wget', quiet = T)
   }
 }
 
-# парсинг сырых XML-данных
+# parsing of JSON
 usersdata <- list()
-for (group in targets) {
-  usersdata[[group]] <- data.frame()
-  print(paste('parsing group:', group))
-  for (filename in list.files('/tmp/', pattern = paste0('*-', group, '.xml'))) {
-    xmldata <- xmlParse(paste0('/tmp/', filename))
-    print(paste("  parsing", filename))
-    tmp <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)[['users']]))
-    if (nrow(usersdata[[group]]) == 0) {
-      usersdata[[group]] <- tmp
+for (target in targets) {
+  usersdata[[target]] <- data.frame()
+  print(paste('parsing group:', target))
+  for (filename in list.files('/tmp/', pattern = paste0('*-', target, '.txt'))) {
+    tmp_file <- paste0('/tmp/', filename)
+    tmp <- fromJSON(file = tmp_file)
+    tmpdata <- do.call("rbind.fill", lapply(tmp$response$users, function(x) as.data.frame(x, stringsAsFactors = F)))
+    if (nrow(usersdata[[target]]) == 0) {
+      usersdata[[target]] <- tmpdata
     } else {
-      usersdata[[group]] <- merge(usersdata[[group]], tmp, all=T)
+      usersdata[[target]] <- merge(usersdata[[target]], tmpdata, all = T)
     }
+    rm(tmpdata)
   }
 }
 # сколько из какой группы получилось?
 sapply(usersdata, nrow)
 
-# слияние данных по группам и классификация
+# слияние данных по группам
 vkdata <- data.frame()
-for (group in names(usersdata)) {
-  category <- as.vector(rep(group, nrow(usersdata[[group]])))
+for (target in targets) {
+  category <- as.vector(rep(target, nrow(usersdata[[target]])))
   if (nrow(vkdata) == 0) {
-    vkdata <- cbind(usersdata[[group]], category)
+    vkdata <- cbind(usersdata[[target]], category)
   } else {
-    vkdata <- rbind(vkdata, cbind(usersdata[[group]], category))
+    vkdata <- rbind(vkdata, cbind(usersdata[[target]], category))
   }
+  rm(category)
 }
-nrow(vkdata)
 rm(usersdata)
 
-# вычисление Tcoeff
-tmp <- as.vector(table(vkdata$uid)[vkdata$uid])
-vkdata$Tcoeff <- tmp
+nrow(vkdata)
 
-# удаление дубликатов по UID
-vkdata <- vkdata[!duplicated(vkdata$uid),]
+###
+#targets <- groupsDB[groupsDB$category == targetCategory, 'group']
 
+sizeTab <- ncol(vkdata)
+selected <- data.frame(matrix(0, ncol = sizeTab - 1))
+colnames(selected) <- colnames(vkdata[,1:(sizeTab - 1)])
+uids <- unique(vkdata$uid)
+template <- as.data.frame(matrix(0, ncol = length(unique(groupsDB$category)), nrow = length(unique(vkdata$uid))))
+colnames(template) <- unique(groupsDB$category)
+for (n in 1:length(uids)) {
+  uid <- uids[n]
+  tmp <- vkdata[vkdata$uid == uid,]
+  selected[n,] <- tmp[1, 1:(sizeTab - 1)]
+  
+  tmp <- t(as.matrix(table(groupsDB[tmp$category, 'category'])))
+  template[n,colnames(tmp)] <- as.vector(tmp)
+}
+selected <- cbind(selected, template)
+rm(uids, template)
+# write.table(selected, 'data/HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
+# selected <- read.table('data/HTS.tab', header = T, sep = '\t', stringsAsFactors = F)
+
+
+### ### Фильтрация
 # удалить бесполезные колонки: type, university, faculty, education_form, education_status, graduation
-vkdata <- vkdata[,!(colnames(vkdata) %in% c('type', 'university', 'faculty', 'education_form', 'education_status', 'graduation'))]
+selected <- selected[,!(colnames(selected) %in% c('university_name', 'faculty_name', 'education_form', 'education_status', 'graduation', 'last_seen.platform'))]
+# замена имён <NA> на 0 для упрощения работы
+selected[is.na(selected$university), 'university'] <- 0
+selected[is.na(selected$faculty), 'faculty'] <- 0
 
 # первичная фильтрация
 gender <- c(0, 1)
 names(gender) <- c('M', 'F')
-selected <- vkdata[vkdata$sex == gender[[sex]],] # оставить только женский пол
+selected <- selected[selected$sex == gender[[sex]],] # оставить только женский пол
 selected <- selected[,!colnames(selected) == 'sex'] # убрать ненужную уже колонку про пол
 selected <- selected[is.na(selected$deactivated),] # выбрать не забаненных и не заблокированных
 selected <- selected[,!colnames(selected) == 'deactivated'] # удалить колонку 'deactivated'
@@ -91,30 +121,120 @@ selected <- selected[,!colnames(selected) == 'deactivated'] # удалить к�
 # 7 – in love
 # удалить типы 2, 3, 4 и 7
 selected <- selected[!selected$relation %in% c(2,3,4,7),]
-selected <- selected[is.na(selected$relation_partner),] # удалить тех, у кого есть тот, с кем сложно
-selected <- selected[,!colnames(selected) == 'relation_partner'] # удалить колонку 'relation_partner'
+selected <- selected[is.na(selected$relation_partner.id),] # удалить тех, у кого есть тот, с кем сложно
+selected <- selected[,!(colnames(selected) %in% grep(x = colnames(selected), pattern = 'relation_partner*', value = T))] # удалить колонки 'relation_partner*'
 selected[is.na(selected$relation), 'relation'] <- 0 # заменить статус NA на 0 для простоты работы
 
 # удаление неактивных пользователей
-removeLast <- function(x) { substr(x, 1, nchar(x)-1) } # создать функциб для отрезания номера платформы от даты last_seen
-selected$last_seen <- removeLast(selected$last_seen) # удалить номер платформы от last_seen
-selected$last_seen <- as.numeric(selected$last_seen) # преобразовать last_seen UNIX-time в число
 selected <- selected[difftime(Sys.time(), as.POSIXct(selected$last_seen, origin='1970-01-01'), units='d') < activity,] # удалить неактивных в течении 20 дней
-selected <- selected[,!colnames(selected) == 'last_seen'] # удалить более не нужную колонку "last_seen"
+selected <- selected[,!colnames(selected) == 'last_seen.time'] # удалить более не нужную колонку "last_seen"
 
-# конвертация bdate в возраст age
-selected$bdate <- as.character(as.Date(selected[,'bdate'], format='%d.%m.%Y')) # преобразование содержимого поля в даты
-selected$age <- as.numeric(round(difftime(Sys.Date(), as.Date(selected[,'bdate'], format='%Y-%m-%d'), units='d')/365, 1)) # пересчёт в года
-selected <- selected[,!colnames(selected) == 'bdate'] # удаление более не нужной колонки bdate
+### Учёт чёрного списка
+blacklist <- read.table('data/BlackList.tab', header = T, stringsAsFactors = F)
+selected <- selected[!(selected$uid %in% blacklist$uid),]
 
-# отсечение по возрасту
-subselected <- selected[!is.na(selected$age),] # разбить по определённой величине bdate
-selected <- selected[is.na(selected$age),] # ...и неопределённой
-subselected <- subselected[subselected$age >= minAge,] # удалить моложе чем minAge лет если возраст не NA
-subselected <- subselected[subselected$age <= maxAge,] # удалить старше чем maxAge лет если возраст не NA
-selected <- rbind(subselected, selected) # склеить обратно в целый датафрейм
-selected[is.na(selected$age), 'age'] <- 0 # заменить NA даты рождения на нули
+### отбор полных дат и неполных дат для экспериментов с RAE, NA даты обнуляются
+# подготовить колонку возраста
+selected$age <- 0
+# разделить на группы с
+tempList <- list()
+# ... неопределённой датой
+tempList[['NA']] <- selected[is.na(selected$bdate),]
+tmp <- selected[!is.na(selected$bdate),] # определённой bdate
+# ... полной датой
+tempList[['Full']] <- tmp[grep('\\d{4}', tmp$bdate),]
+# ... неполной датой для RAE
+tempList[['Trimm']] <- tmp[grep('\\d{4}', tmp$bdate, invert = T),]
 
+### вывод для RAE
+write.table(x = tempList[['Trimm']], file = 'data/data_for_RAE.tab', sep='\t', row.names=F, col.names=T, quote=T)
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+'ReversAgeEstimate.R'
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+### чтение после RAE
+tempList[['RAEd']] <- read.table('data/data_RAE_pass.tab', sep = '\t', header = T, stringsAsFactors = F)
+
+### конвертация bdate в возраст age для определённых полных дат
+tempList[['Full']]$bdate <- as.character(as.Date(tempList[['Full']][,'bdate'], format='%d.%m.%Y')) # преобразование содержимого поля в даты
+tempList[['Full']]$age <- as.numeric(round(difftime(Sys.Date(), as.Date(tempList[['Full']][,'bdate'], format='%Y-%m-%d'), units='d')/365, 1)) # пересчёт в года
+
+tempList[['Full']] <- tempList[['Full']][tempList[['Full']]$age >= minAge,] # удалить моложе чем minAge лет если возраст не NA
+tempList[['Full']] <- tempList[['Full']][tempList[['Full']]$age <= maxAge,] # удалить старше чем maxAge лет если возраст не NA
+selected <- rbind(tempList[['Full']], tempList[['RAEd']]) # склеить обратно в целый датафрейм полные отфильтрованные и неполные после RAE
+selected <- rbind(tempList[['NA']], selected) # склеить обратно суммарно отфильтрованные и с неопределёнными датами
+selected[is.na(selected$bdate), 'bdate'] <- 0 # заменить NA даты рождения на нули
+rm(tempList)
+
+### Получение данных о группах из selected и фильтрация спамерш
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+'CaptureGroupsSubs.R'
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+### Скоринг по T-параметрам и числу групп
+# f(age) не нужен, f(ngroups) = lg(ngroups), f(TRNSI) = (T + R + N + S + I) XX (2 0.5 0.5 0.25 0.5)
+scoring <- function(x) {
+  x <- x[c('T', 'R', 'N', 'S', 'I', 'ngroups')]
+  x <- as.integer(x)
+  names(x) <- c('T', 'R', 'N', 'S', 'I', 'ngroups')
+  tmp <- 2 * x['T'] + 0.5 * x['R'] + 0.5 * x['N'] + 0.25 * x['S'] + 0.5 * x['I']
+  tmp <- round(tmp - log10(x['ngroups']), 1)
+  names(tmp) <- ''
+  return(tmp)
+}
+
+selected$score <- apply(selected, 1, scoring)
+selected[is.infinite(selected$score), 'score'] <- 0
+
+plot(sort(selected$score))
+head(selected[order(selected$score, decreasing = T),], 25)
+
+
+### Захват мета-данных стен и загрузка комментариев
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+'WallDownload.R'
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+# selected <- read.table('data/HTS.tab', header = T, sep = '\t', stringsAsFactors = F)
+
+
+### Получение дополнительного скоринга для правильно идеологических
+# загрузка файла
+download.file(url = paste0('https://api.vk.com/method/users.search?sex=', gender[[sex]], '&religion=', ideology, '&count=1000', '&access_token=', token), destfile = '/tmp/ideo-reward.txt', method='wget', quiet = F)
+# парсинг JSON
+tmp <- fromJSON(file = '/tmp/ideo-reward.txt')$response
+# преобразование в вектор uid
+tmp[[1]] <- NULL
+tmp <- sapply(tmp, function(x) unlist(x))['uid',]
+# увеличение Score, величина награды 5
+selected[selected$uid %in% tmp,]$score <- selected[selected$uid %in% tmp,]$score + 5
+# задание метки правильной идеологии RiId
+selected$RiId <- 0
+selected[selected$uid %in% tmp,]$RiId <- 1
+
+
+### Получение тем и комментариев в Т-группах
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+'CaptureGroupActivity.R'
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+# увеличение Score: + ntopic и 1 + ln(ncomm + 1)
+selected$score <- selected$score + selected$ntopics + round(log(selected$ncomm + 1), 1)
+
+
+# сохранение результатов
+write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
+
+
+
+
+
+
+# --------------------------------------------------------------------- #
 # получение стран из базы данных Vk
 countries <- levels(as.factor(selected$country))
 download.file(paste0('https://api.vk.com/method/database.getCountriesById.xml?country_ids=', paste(countries, collapse=',')), destfile='/tmp/countries.txt', method='wget')
@@ -145,15 +265,8 @@ for (city in levels(citydb$cid) ) {
   selected[selected$city == city, 'city'] <- rep(x=as.character(citydb[citydb$cid == city, 'name']), times=length(selected[selected$city == city, 'city']))
 }
 
-# удалить символ "\n" из имён университетов и факультетов
-selected$university_name <- gsub(pattern='\n', replacement='', selected$university_name, perl=T)
-selected$faculty_name <- gsub(pattern='\n', replacement='', selected$faculty_name, perl=T)
-# замена имён <NA> на 0 для упрощения работы
-selected[is.na(selected$university_name), 'university_name'] <- 0
-selected[is.na(selected$faculty_name), 'faculty_name'] <- 0
-# замена пустых имён на 0 для упрощения работы
-selected[selected$university_name == '', 'university_name'] <- 0
-selected[selected$faculty_name == '', 'faculty_name'] <- 0
+
+
 
 ### ### вывод конечных результатов в табличный файл
 write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
