@@ -42,7 +42,7 @@ for (uid in selected[selected$wallsize > 5, 'uid']) {
   for (k in 1:ceiling(ncomments/80)) {
     attempts <- 5
     att <- 0
-    filename <- paste0('/tmp/wall-block-', id, '-', k, '.txt')
+    filename <- paste0('/tmp/wall-block-', uid, '-', k, '.txt')
     print(filename)
     Sys.sleep(0.4)
     download.file(url = paste0('https://api.vk.com/method/wall.get?owner_id=', uid, '&count=80', '&filter=owner', '&offset=', (k-1) * 80, '&access_token=', token), destfile = filename, method='wget', quiet = T)
@@ -75,8 +75,6 @@ for (uid in selected[selected$wallsize > 5, 'uid']) {
   selected[selected$uid == uid, 'comkchars'] <- comkchar
   print(paste(uid, comkchar))
 }
-
-save(CorrData, file = 'data/CorrDat_wall.rdt')
 
 # --------------------------------------------------------------------- #
 for (id in selected$uid) {
@@ -136,6 +134,3 @@ for (id in selected$uid) {
     close(out)
   }
 }
-
-### ### вывод конечных результатов в табличный файл
-write.table(file='data/HTS-full.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)

@@ -3,7 +3,7 @@ library(rjson)
 library(plyr)
 
 setwd("~/Dropbox/evfr/HTS/")
-load('.RData')
+#load('.RData')
 
 # возраст
 minAge <- 21
@@ -34,7 +34,7 @@ for (target in targets) {
   stepSize <- as.integer(member_count / 1000)
   for (s in seq(0, stepSize)) {
     Sys.sleep(0.5)
-    download.file(paste0('https://api.vk.com/method/groups.getMembers?group_id=', target, '&offset=', s * 1000,'&fields=sex,bdate,city,country,education,last_seen,relation&access_token=', token), destfile = paste0('/tmp/vkDB-', s, '-', target, '.txt'), method = 'wget', quiet = T)
+    download.file(paste0('https://api.vk.com/method/groups.getMembers?group_id=', target, '&offset=', s * 1000,'&fields=sex,bdate,city,country,last_seen,relation&access_token=', token), destfile = paste0('/tmp/vkDB-', s, '-', target, '.txt'), method = 'wget', quiet = T)
   }
 }
 
@@ -97,8 +97,8 @@ rm(uids, template)
 
 
 ### ### Фильтрация
-# удалить бесполезные колонки: type, university, faculty, education_form, education_status, graduation
-selected <- selected[,!(colnames(selected) %in% c('university_name', 'faculty_name', 'education_form', 'education_status', 'graduation', 'last_seen.platform'))]
+# удалить бесполезные колонки
+selected <- selected[,!(colnames(selected) %in% c('last_seen.platform'))]
 # замена имён <NA> на 0 для упрощения работы
 selected[is.na(selected$university), 'university'] <- 0
 selected[is.na(selected$faculty), 'faculty'] <- 0
@@ -150,7 +150,7 @@ tempList[['Trimm']] <- tmp[grep('\\d{4}', tmp$bdate, invert = T),]
 write.table(x = tempList[['Trimm']], file = 'data/data_for_RAE.tab', sep='\t', row.names=F, col.names=T, quote=T)
 # ~~~~~~~~ #
 # ~~~~~~~~ #
-'ReversAgeEstimate.R'
+source(file = 'WSS/ReversAgeEstimate.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
 ### чтение после RAE
@@ -170,7 +170,7 @@ rm(tempList)
 ### Получение данных о группах из selected и фильтрация спамерш
 # ~~~~~~~~ #
 # ~~~~~~~~ #
-'CaptureGroupsSubs.R'
+source(file = 'WSS/CaptureGroupsSubs.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
 ### Скоринг по T-параметрам и числу групп
@@ -195,13 +195,29 @@ head(selected[order(selected$score, decreasing = T),], 25)
 ### Захват мета-данных стен и загрузка комментариев
 # ~~~~~~~~ #
 # ~~~~~~~~ #
-'WallDownload.R'
+source(file = 'WSS/WallDownload.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
 # selected <- read.table('data/HTS.tab', header = T, sep = '\t', stringsAsFactors = F)
 
+### Подсчёт Т-ключевых слов на стенах
+# Т-слова
+Twords <- c('трансгуман', 'иммортали', 'крион', 'бессмерт', 'нанотехн', 'сингулярн', 'геронтол', 'киборг', 'апгрейд')
+# подсчёт T-слов в комментариях для каждого пользователя
+tmp <- sapply(CorrData[['wall']], function(x) length(grep(pattern = paste0(Twords, collapse = '|'), x)))
+names(tmp) <- gsub('id', '', names(tmp))
+# ограничение tmp по набору имён
+tmp <- tmp[names(tmp) %in% selected[which(selected$uid %in% names(tmp)), 'uid']]
+# запись в основной датафрейм
+selected$Twords <- 0
+selected[which(selected$uid %in% names(tmp)), 'Twords'] <- tmp
+# повышение score за T-слова по закону log2(Twords) - log(wallsize) + 2 как центрование
+selected$score <- selected$score + log2(selected$Twords + 1) - log10(selected$wallsize + 1) + 2
+### вывод таблицы
+# write.table(selected, 'data/HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
 
-### Получение дополнительного скоринга для правильно идеологических
+
+### Получение дополнительного скоринга для правильно идеологических - уже сделано
 # загрузка файла
 download.file(url = paste0('https://api.vk.com/method/users.search?sex=', gender[[sex]], '&religion=', ideology, '&count=1000', '&access_token=', token), destfile = '/tmp/ideo-reward.txt', method='wget', quiet = F)
 # парсинг JSON
@@ -216,10 +232,10 @@ selected$RiId <- 0
 selected[selected$uid %in% tmp,]$RiId <- 1
 
 
-### Получение тем и комментариев в Т-группах
+### Получение тем и комментариев в Т-группах #
 # ~~~~~~~~ #
 # ~~~~~~~~ #
-'CaptureGroupActivity.R'
+source(file = 'WSS/CaptureGroupActivity.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
 # увеличение Score: + ntopic и 1 + ln(ncomm + 1)
@@ -229,45 +245,10 @@ selected$score <- selected$score + selected$ntopics + round(log(selected$ncomm +
 # сохранение результатов
 write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
 
-
-
-
-
-
-# --------------------------------------------------------------------- #
-# получение стран из базы данных Vk
-countries <- levels(as.factor(selected$country))
-download.file(paste0('https://api.vk.com/method/database.getCountriesById.xml?country_ids=', paste(countries, collapse=',')), destfile='/tmp/countries.txt', method='wget')
-xmldata <- xmlParse('/tmp/countries.txt')
-countidb <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
-# замещение индексных номеров стран на нормальные названия
-for (country in levels(countidb$cid) ) {
-  selected[selected$country == country, 'country'] <- rep(x=as.character(countidb[countidb$cid == country, 'name']), times=length(selected[selected$country == country, 'country']))
-}
-
-# получение городов из базы данных Vk
-citydb <- data.frame()
-cities <- levels(as.factor(selected$city))
-for (k in 1:ceiling(length(cities)/500)) {
-  tmp <- cities[(1 + (k-1) * 500):(k * 500)]
-  Sys.sleep(0.4)
-  download.file(paste0('https://api.vk.com/method/database.getCitiesById.xml?city_ids=', paste(tmp, collapse=',')), destfile=paste0('/tmp/cities-', k, '.txt'), method='wget')
-  xmldata <- xmlParse(paste0('/tmp/cities-', k, '.txt'))
-  tmp <- xmlToDataFrame(nodes = xmlChildren(xmlRoot(xmldata)))
-  if (nrow(citydb) == 0) {
-    citydb <- tmp
-  } else {
-    citydb <- rbind(citydb, tmp)
-  }
-}
-# замена идентификаторов городов на нормальные названия
-for (city in levels(citydb$cid) ) {
-  selected[selected$city == city, 'city'] <- rep(x=as.character(citydb[citydb$cid == city, 'name']), times=length(selected[selected$city == city, 'city']))
-}
-
-
-
-
-### ### вывод конечных результатов в табличный файл
-write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
+### загрузка фоток
+# ~~~~~~~~ #
+# ~~~~~~~~ #
+source(file = 'WSS/PhotoCapture.R')
+# ~~~~~~~~ #
+# ~~~~~~~~ #
 

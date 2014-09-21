@@ -52,8 +52,3 @@ selected <- selected[!((selected$ngroups >= 950) & rowSums(selected[,unique(grou
 # удаление удалённых uid из CorrData[['groups']]
 CorrData[['groups']] <- CorrData[['groups']][names(CorrData[['groups']]) %in% paste('id', selected$uid, sep = '')]
 
-### сохранение объекта CorrData
-save(CorrData, file = 'data/CorrDat.rdt')
-
-### ### вывод конечных результатов в табличный файл
-write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
