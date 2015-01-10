@@ -1,42 +1,63 @@
+## загрузка нужных библиотек
+# для парсинга XML и/или JSON - vk возвращает данные в таких форматах
 library(XML)
 library(rjson)
+# и для работы с данными, напр. поддержкой data frames
 library(plyr)
 
+# команды для каталогов
 setwd("~/Dropbox/evfr/HTS/")
 load('.RData')
 
+## поисковые параметры
 # ---------------- #
-# возраст
+# минимальный и максимальный возраст
 minAge <- 21
 maxAge <- 25
 # пол
 sex <- 'F'
-# срок активности, дни
+# срок последней активности в днях
 activity <- 20
-# идеология
+# идеология - поле анкеты пользователей religion
 ideology <- c('трансгуманизм', 'иммортализм')
-# Т-слова
+# корни Т-слов для grep'анья
 Twords <- c('трансгуман', 'иммортали', 'крион', 'бессмерт', 'нанотехн', 'сингулярн', 'геронтол', 'киборг', 'апгрейд')
 # ---------------- #
 
-
-# набор целевых групп
+## чтение списка целевых групп - табулированный файл со списком групп и категорий групп
 groupsDB <- read.table('db/groupsDB.tab', header = T, stringsAsFactors = F)
+## чтение чёрного списка - табулированныцй файл с ID юзеров
+blacklist <- read.table('data/BlackList.tab', header = T, stringsAsFactors = F)
 
-# bulk data members download
+
+## скачивание полных списков участников всех целевых групп
+# получить список имён групп для цикла
 targets <- groupsDB$group
+# обход циклом процедуры скачки для каждой группы
 for (target in targets) {
+	# диагностический вывод имени
   print(paste('  Group:  ', target))
+	# пауза перед запросом чтобы не забанили на vk
   Sys.sleep(0.5)
+	# запрос информации о группе к API vk по методу groups.getById с возвращаемым полем members_count с сохранением ответа во временный файл /tmp/<target>.txt
   download.file(paste0('https://api.vk.com/method/groups.getById?group_id=', target, '&fields=members_count'), destfile=paste0('/tmp/', target, '.txt'), method='wget', quiet = T)
+	# составление переменной имени файла
   tmp_file <- paste0('/tmp/',target, '.txt')
+	# парсинг JSON файла
   tmp <- fromJSON(file = tmp_file)
+	# вытаскивание из JSON файла целевого значения числа пользователей из поля members_count
   member_count <- tmp$response[[1]]$members_count
+	# вывод числа пользователей
   print(paste('    members  ', member_count))
+	# удаление временного файла
   system(paste0('rm /tmp/', target, '.txt'))
+	# вычисление числа шагов блочного скачивания всех членов группы (vk возвращает только по 1000 участников группы за возвращение) как округление к меньшему member_count / 1000
   stepSize <- as.integer(member_count / 1000)
+	# пробег цикла по последовательности 0 .. <число шагов>
   for (s in seq(0, stepSize)) {
+	# пауза чтобы не банили
     Sys.sleep(0.5)
+	# запрос информации о группе к API vk по методу groups.getMembers с отступом вывода пользователей <номер_шага> x 1000 при выводе полей информации пользователей sex, bdate, city, country, last_seen, relation с сохранением во временный файл '/tmp/vkDB-<номер_шага>-<target>.txt' и приделанным в запрос токеном для доступа к информации пользователей к отключённым доступом у незареганных в vk
     download.file(paste0('https://api.vk.com/method/groups.getMembers?group_id=', target, '&offset=', s * 1000,'&fields=sex,bdate,city,country,last_seen,relation&access_token=', token), destfile = paste0('/tmp/vkDB-', s, '-', target, '.txt'), method = 'wget', quiet = T)
   }
 }
@@ -126,7 +147,6 @@ selected <- selected[difftime(Sys.time(), as.POSIXct(selected$last_seen, origin=
 selected <- selected[,!colnames(selected) == 'last_seen.time'] # удалить более не нужную колонку "last_seen"
 
 ### Учёт чёрного списка
-blacklist <- read.table('data/BlackList.tab', header = T, stringsAsFactors = F)
 selected <- selected[!(selected$uid %in% blacklist$uid),]
 
 # Вывод primaty table
