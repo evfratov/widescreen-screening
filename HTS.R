@@ -3,8 +3,9 @@ library(rjson)
 library(plyr)
 
 setwd("~/Dropbox/evfr/HTS/")
-#load('.RData')
+load('.RData')
 
+# ---------------- #
 # возраст
 minAge <- 21
 maxAge <- 25
@@ -12,16 +13,18 @@ maxAge <- 25
 sex <- 'F'
 # срок активности, дни
 activity <- 20
+# идеология
+ideology <- c('трансгуманизм', 'иммортализм')
+# Т-слова
+Twords <- c('трансгуман', 'иммортали', 'крион', 'бессмерт', 'нанотехн', 'сингулярн', 'геронтол', 'киборг', 'апгрейд')
+# ---------------- #
+
 
 # набор целевых групп
 groupsDB <- read.table('db/groupsDB.tab', header = T, stringsAsFactors = F)
-targets <- groupsDB$group
-# категория 
-targetCategory <- 'N'
-# идеология
-ideology <- 'трансгуманизм'
 
 # bulk data members download
+targets <- groupsDB$group
 for (target in targets) {
   print(paste('  Group:  ', target))
   Sys.sleep(0.5)
@@ -71,10 +74,8 @@ for (target in targets) {
 }
 rm(usersdata)
 
+# сколько вообще людей набралось
 nrow(vkdata)
-
-###
-#targets <- groupsDB[groupsDB$category == targetCategory, 'group']
 
 sizeTab <- ncol(vkdata)
 selected <- data.frame(matrix(0, ncol = sizeTab - 1))
@@ -92,21 +93,16 @@ for (n in 1:length(uids)) {
 }
 selected <- cbind(selected, template)
 rm(uids, template)
-# write.table(selected, 'data/HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
-# selected <- read.table('data/HTS.tab', header = T, sep = '\t', stringsAsFactors = F)
 
 
 ### ### Фильтрация
 # удалить бесполезные колонки
 selected <- selected[,!(colnames(selected) %in% c('last_seen.platform'))]
-# замена имён <NA> на 0 для упрощения работы
-selected[is.na(selected$university), 'university'] <- 0
-selected[is.na(selected$faculty), 'faculty'] <- 0
 
 # первичная фильтрация
 gender <- c(0, 1)
 names(gender) <- c('M', 'F')
-selected <- selected[selected$sex == gender[[sex]],] # оставить только женский пол
+selected <- selected[selected$sex == gender[[sex]],] # оставить только нужный пол
 selected <- selected[,!colnames(selected) == 'sex'] # убрать ненужную уже колонку про пол
 selected <- selected[is.na(selected$deactivated),] # выбрать не забаненных и не заблокированных
 selected <- selected[,!colnames(selected) == 'deactivated'] # удалить колонку 'deactivated'
@@ -132,6 +128,10 @@ selected <- selected[,!colnames(selected) == 'last_seen.time'] # удалить 
 ### Учёт чёрного списка
 blacklist <- read.table('data/BlackList.tab', header = T, stringsAsFactors = F)
 selected <- selected[!(selected$uid %in% blacklist$uid),]
+
+# Вывод primaty table
+write.table(selected, 'data/primary-HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
+
 
 ### отбор полных дат и неполных дат для экспериментов с RAE, NA даты обнуляются
 # подготовить колонку возраста
@@ -167,29 +167,34 @@ selected <- rbind(tempList[['NA']], selected) # склеить обратно с
 selected[is.na(selected$bdate), 'bdate'] <- 0 # заменить NA даты рождения на нули
 rm(tempList)
 
+### контейнер для данных групп, стен и активности
+CorrData <- list()
+
+
 ### Получение данных о группах из selected и фильтрация спамерш
 # ~~~~~~~~ #
 # ~~~~~~~~ #
 source(file = 'WSS/CaptureGroupsSubs.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
+# удаление 1000ниц (приближение 950) по группам при суммарном T-coeff == 1
+selected <- selected[!((selected$ngroups >= 950) & rowSums(selected[,unique(groupsDB$category)]) == 1),]
+# удаление удалённых uid из CorrData[['groups']]
+CorrData[['groups']] <- CorrData[['groups']][names(CorrData[['groups']]) %in% paste('id', selected$uid, sep = '')]
+
+
 ### Скоринг по T-параметрам и числу групп
-# f(age) не нужен, f(ngroups) = lg(ngroups), f(TRNSI) = (T + R + N + S + I) XX (2 0.5 0.5 0.25 0.5)
+# f(ngroups) = lg(ngroups + 1), f(TRNSI) = (T + R + N + S + I) XX (2 0.5 0.5 0.25 0.5)
 scoring <- function(x) {
-  x <- x[c('T', 'R', 'N', 'S', 'I', 'ngroups')]
+  x <- x[c(unique(groupsDB$category), 'ngroups')]
   x <- as.integer(x)
-  names(x) <- c('T', 'R', 'N', 'S', 'I', 'ngroups')
+  names(x) <- c(unique(groupsDB$category), 'ngroups')
   tmp <- 2 * x['T'] + 0.5 * x['R'] + 0.5 * x['N'] + 0.25 * x['S'] + 0.5 * x['I']
-  tmp <- round(tmp - log10(x['ngroups']), 1)
+  tmp <- round(tmp - log10(x['ngroups'] + 1), 1)
   names(tmp) <- ''
   return(tmp)
 }
-
 selected$score <- apply(selected, 1, scoring)
-selected[is.infinite(selected$score), 'score'] <- 0
-
-plot(sort(selected$score))
-head(selected[order(selected$score, decreasing = T),], 25)
 
 
 ### Захват мета-данных стен и загрузка комментариев
@@ -198,11 +203,8 @@ head(selected[order(selected$score, decreasing = T),], 25)
 source(file = 'WSS/WallDownload.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
-# selected <- read.table('data/HTS.tab', header = T, sep = '\t', stringsAsFactors = F)
 
 ### Подсчёт Т-ключевых слов на стенах
-# Т-слова
-Twords <- c('трансгуман', 'иммортали', 'крион', 'бессмерт', 'нанотехн', 'сингулярн', 'геронтол', 'киборг', 'апгрейд')
 # подсчёт T-слов в комментариях для каждого пользователя
 tmp <- sapply(CorrData[['wall']], function(x) length(grep(pattern = paste0(Twords, collapse = '|'), x)))
 names(tmp) <- gsub('id', '', names(tmp))
@@ -217,20 +219,21 @@ selected$score <- selected$score + log2(selected$Twords + 1) - log10(selected$wa
 # write.table(selected, 'data/HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
 
 
-### Получение дополнительного скоринга для правильно идеологических - уже сделано
-# загрузка файла
-download.file(url = paste0('https://api.vk.com/method/users.search?sex=', gender[[sex]], '&religion=', ideology, '&count=1000', '&access_token=', token), destfile = '/tmp/ideo-reward.txt', method='wget', quiet = F)
-# парсинг JSON
-tmp <- fromJSON(file = '/tmp/ideo-reward.txt')$response
-# преобразование в вектор uid
-tmp[[1]] <- NULL
-tmp <- sapply(tmp, function(x) unlist(x))['uid',]
-# увеличение Score, величина награды 5
-selected[selected$uid %in% tmp,]$score <- selected[selected$uid %in% tmp,]$score + 5
-# задание метки правильной идеологии RiId
+### Получение дополнительного скоринга для правильно идеологических
 selected$RiId <- 0
-selected[selected$uid %in% tmp,]$RiId <- 1
-
+for (ideo in ideology) {
+  # загрузка файла
+  download.file(url = paste0('https://api.vk.com/method/users.search?sex=', gender[[sex]], '&religion=', ideo, '&count=1000', '&access_token=', token), destfile = '/tmp/ideo-reward.txt', method='wget', quiet = F)
+  # парсинг JSON
+  tmp <- fromJSON(file = '/tmp/ideo-reward.txt')$response
+  # преобразование в вектор uid
+  tmp[[1]] <- NULL
+  tmp <- sapply(tmp, function(x) unlist(x))['uid',]
+  # увеличение Score, величина награды 5
+  selected[selected$uid %in% tmp,]$score <- selected[selected$uid %in% tmp,]$score + 5
+  # задание метки правильной идеологии RiId
+  selected[selected$uid %in% tmp,]$RiId <- selected[selected$uid %in% tmp,]$RiId + 1
+}
 
 ### Получение тем и комментариев в Т-группах #
 # ~~~~~~~~ #
@@ -251,4 +254,19 @@ write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T,
 source(file = 'WSS/PhotoCapture.R')
 # ~~~~~~~~ #
 # ~~~~~~~~ #
+
+save.image(file = '.RData')
+
+### функция вывода данных
+userdata <- function(cand) {
+  v <- selected[selected$uid == cand,]
+  print(v)
+  print(CorrData[['comments']][[paste0('id', cand)]])
+  CorrData[['groups']][[paste0('id', cand)]]
+#   CorrData[['wall']][[paste0('id', cand)]]
+}
+
+### компактный вывод
+head(selected[order(selected$score, decreasing = T), c('uid','first_name','last_name','age','T','R','N','S','I','score','Twords','RiId','ntopics','ncomm')], 20)
+
 

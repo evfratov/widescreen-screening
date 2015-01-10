@@ -1,14 +1,8 @@
 # Start only with HTS.R !!!
 
-# для точности прочитать файл вывода ещё раз
-# selected <- read.table('HTS.tab', header = T, stringsAsFactors = F)
-
 ### корреляционный анализ групп и подписок
 # число групп
 selected$ngroups <- rep(0, nrow(selected))
-
-# контейнер
-CorrData <- list()
 
 ### ### группы
 for (uid in selected$uid) {
@@ -42,13 +36,4 @@ for (uid in selected$uid) {
   file.remove(filename)
   # сохранение
   CorrData[['groups']][[paste0('id', uid)]] <- extend
-  # вывод датафрейма
-#  write.table(extend, paste0('/tmp/vkDB-groups-', uid,'.tab'), quote = F, sep = "\t", row.names = F, col.names = T)
 }
-
-### удаление 1000ниц (приближение 950) по группам при суммарном T-coeff == 1
-selected <- selected[!((selected$ngroups >= 950) & rowSums(selected[,unique(groupsDB$category)]) == 1),]
-
-# удаление удалённых uid из CorrData[['groups']]
-CorrData[['groups']] <- CorrData[['groups']][names(CorrData[['groups']]) %in% paste('id', selected$uid, sep = '')]
-

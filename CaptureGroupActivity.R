@@ -75,7 +75,6 @@ for (tmp in sapply(threads, function(x) x$created_by)) {
 
 # Получение коментов
 selected$ncomm <- 0
-comments <- list()
 for (name in names(threads)) {
   # отсечь буквы
   gid <- sub('gr', '', name)
@@ -116,10 +115,11 @@ for (name in names(threads)) {
             selected[selected$uid == u, 'ncomm']  <- as.numeric(table(temp$from_id)[u]) + selected[selected$uid == u, 'ncomm']
             print(selected[selected$uid == u,])
             # сохранение текста комента
-            if (is.null(comments[[paste0('id', u, collapse = '')]])) {
-              comments[[paste0('id', u, collapse = '')]] <- as.vector(temp$text)
+            if (is.null(CorrData[['comments']][[paste0('id', u, collapse = '')]])) {
+              CorrData[['comments']][[paste0('id', u, collapse = '')]] <- as.vector(temp$text)
             } else {
-              comments[[paste0('id', u, collapse = '')]] <- c(comments[[paste0('id', u, collapse = '')]], as.vector(temp$text))
+              temporal <- c(CorrData[['comments']][[paste0('id', u, collapse = '')]], as.vector(temp$text))
+              CorrData[['comments']][paste0('id', u, collapse = '')] <- list(temporal)
             }
           }
         }
