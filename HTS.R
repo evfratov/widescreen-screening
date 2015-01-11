@@ -197,51 +197,55 @@ selected <- selected[!(selected$uid %in% blacklist$uid),]
 
 # Промежуточный вывод в текстовый файл полученной после предварительной фильтрации  таблицы
 write.table(selected, 'data/primary-HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
-#------------------------------------------------------------------------------#
 
-### отбор полных дат и неполных дат для экспериментов с RAE, NA даты обнуляются
-# подготовить колонку возраста
+## отбор полных дат и неполных дат Реверсивной Оценки Возраста
+# подготовить колонку возраста с нулями
 selected$age <- 0
-# разделить на группы с
+# разделить таблицу на группы с ...
 tempList <- list()
-# ... неопределённой датой
+# ... неопределённой bdate
 tempList[['NA']] <- selected[is.na(selected$bdate),]
-tmp <- selected[!is.na(selected$bdate),] # определённой bdate
-# ... полной датой
+# ... определённой bdate
+tmp <- selected[!is.na(selected$bdate),]
+# ... полной датой, с указанием 4-значного года
 tempList[['Full']] <- tmp[grep('\\d{4}', tmp$bdate),]
-# ... неполной датой для RAE
+# ... и неполной датой для реверсиной оценки
 tempList[['Trimm']] <- tmp[grep('\\d{4}', tmp$bdate, invert = T),]
 
-### вывод для RAE
+# вывод таблицы с неполными датами в текстовый файл для передачи для скрипта реверсивной оценки
 write.table(x = tempList[['Trimm']], file = 'data/data_for_RAE.tab', sep='\t', row.names=F, col.names=T, quote=T)
-# ~~~~~~~~ #
-# ~~~~~~~~ #
+# исполнение скрипта реверсивной оценки возраста
 source(file = 'WSS/ReversAgeEstimate.R')
 # ~~~~~~~~ #
-# ~~~~~~~~ #
-### чтение после RAE
+# чтение вывода скрипта реверсивной оценки возраста
 tempList[['RAEd']] <- read.table('data/data_RAE_pass.tab', sep = '\t', header = T, stringsAsFactors = F)
 
-### конвертация bdate в возраст age для определённых полных дат
-tempList[['Full']]$bdate <- as.character(as.Date(tempList[['Full']][,'bdate'], format='%d.%m.%Y')) # преобразование содержимого поля в даты
-tempList[['Full']]$age <- as.numeric(round(difftime(Sys.Date(), as.Date(tempList[['Full']][,'bdate'], format='%Y-%m-%d'), units='d')/365, 1)) # пересчёт в года
+## конвертация bdate в возраст age для полных дат
+# преобразование содержимого поля в даты
+tempList[['Full']]$bdate <- as.character(as.Date(tempList[['Full']][,'bdate'], format='%d.%m.%Y'))
+# пересчёт в года
+tempList[['Full']]$age <- as.numeric(round(difftime(Sys.Date(), as.Date(tempList[['Full']][,'bdate'], format='%Y-%m-%d'), units='d')/365, 1))
 
-tempList[['Full']] <- tempList[['Full']][tempList[['Full']]$age >= minAge,] # удалить моложе чем minAge лет если возраст не NA
-tempList[['Full']] <- tempList[['Full']][tempList[['Full']]$age <= maxAge,] # удалить старше чем maxAge лет если возраст не NA
-selected <- rbind(tempList[['Full']], tempList[['RAEd']]) # склеить обратно в целый датафрейм полные отфильтрованные и неполные после RAE
-selected <- rbind(tempList[['NA']], selected) # склеить обратно суммарно отфильтрованные и с неопределёнными датами
-selected[is.na(selected$bdate), 'bdate'] <- 0 # заменить NA даты рождения на нули
+# удалить моложе чем minAge лет если возраст не NA
+tempList[['Full']] <- tempList[['Full']][tempList[['Full']]$age >= minAge,]
+# удалить старше чем maxAge лет если возраст не NA
+tempList[['Full']] <- tempList[['Full']][tempList[['Full']]$age <= maxAge,]
+# склеить обратно в целый data frame с полными отфильтрованными датами и неполными после реверсивной оценки
+selected <- rbind(tempList[['Full']], tempList[['RAEd']])
+# склеить обратно суммарно отфильтрованные и с неопределёнными датами
+selected <- rbind(tempList[['NA']], selected)
+# заменить NA даты рождения на нули
+selected[is.na(selected$bdate), 'bdate'] <- 0
+# удалить из памяти временную таблицу
 rm(tempList)
 
-### контейнер для данных групп, стен и активности
+## контейнер-словарь для данных групп, стен и активности
 CorrData <- list()
+#------------------------------------------------------------------------------#
 
-
-### Получение данных о группах из selected и фильтрация спамерш
-# ~~~~~~~~ #
-# ~~~~~~~~ #
+## Получение данных о группах и фильтрация спамеров
+# запуск скрипта выкачкм списков групп
 source(file = 'WSS/CaptureGroupsSubs.R')
-# ~~~~~~~~ #
 # ~~~~~~~~ #
 # удаление 1000ниц (приближение 950) по группам при суммарном T-coeff == 1
 selected <- selected[!((selected$ngroups >= 950) & rowSums(selected[,unique(groupsDB$category)]) == 1),]

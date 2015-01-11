@@ -1,10 +1,7 @@
-# Start only with HTS.R !!!
-
-### корреляционный анализ групп и подписок
-# число групп
+# инициализировать колонку в selected под число групп
 selected$ngroups <- rep(0, nrow(selected))
 
-### ### группы
+# пробегание цикла по всем идентификаторам пользователей
 for (uid in selected$uid) {
   # загрузка информации о группах
   filename <- paste0('/tmp/groups-', uid, '.xml')
