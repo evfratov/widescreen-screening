@@ -1,4 +1,5 @@
-# Start only with HTS.R !!!
+# весь этот говнокод надо полностью переписать
+
 
 # Получить список идентификаторов групп
 download.file(url = paste0('https://api.vk.com/method/groups.getById?group_ids=', paste(groupsDB$group, collapse = ','), '&access_token=', token), destfile = '/tmp/tmp.txt', method='wget', quiet = F)

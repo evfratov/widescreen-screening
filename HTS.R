@@ -252,9 +252,9 @@ selected <- selected[!((selected$ngroups >= 950) & rowSums(selected[,unique(grou
 CorrData[['groups']] <- CorrData[['groups']][names(CorrData[['groups']]) %in% paste('id', selected$uid, sep = '')]
 
 
-#------------------------------------------------------------------------------#
 ## Скоринг по T-параметрам и числу групп
 # f(ngroups) = lg(ngroups + 1), f(TRNSI) = (T + R + N + S + I) XX (2 0.5 0.5 0.25 0.5)
+# нахрен всё это надо переделать, значительно упростить вычисление Ъ-score, а штрафы за галиматью, типа 900 групп и 15 килопостов записывать в отдельное число штрафных очков
 scoring <- function(x) {
   x <- x[c(unique(groupsDB$category), 'ngroups')]
   x <- as.integer(x)
@@ -264,79 +264,88 @@ scoring <- function(x) {
   names(tmp) <- ''
   return(tmp)
 }
+# вычисление рейтинга путём применения ко всем строкам функции вычисления рейтинга
 selected$score <- apply(selected, 1, scoring)
 
 
 ### Захват мета-данных стен и загрузка комментариев
-# ~~~~~~~~ #
-# ~~~~~~~~ #
+# исполнение внешнего скрипта для скачивания всех постов пользователя со стены
 source(file = 'WSS/WallDownload.R')
 # ~~~~~~~~ #
-# ~~~~~~~~ #
 
-### Подсчёт Т-ключевых слов на стенах
-# подсчёт T-слов в комментариях для каждого пользователя
+## Подсчёт ключевых Т-слов на стенах
+# подсчёт T-слов в постах на стенах для каждого пользователя в разделе словаря-хранилища 'wall'
+# с сохранением возвращаемого проименованного числового вектора во временную переменную
 tmp <- sapply(CorrData[['wall']], function(x) length(grep(pattern = paste0(Twords, collapse = '|'), x)))
+# удаление префикса id из имён временного вектора
 names(tmp) <- gsub('id', '', names(tmp))
-# ограничение tmp по набору имён
+# ограничение tmp по набору имён - при анализе опускались пользователи с маленькими стенами
 tmp <- tmp[names(tmp) %in% selected[which(selected$uid %in% names(tmp)), 'uid']]
-# запись в основной датафрейм
+# инициализация колонки Tword в основном data frame
 selected$Twords <- 0
+# запись подсчётов в основной data frame
 selected[which(selected$uid %in% names(tmp)), 'Twords'] <- tmp
-# повышение score за T-слова по закону log2(Twords) - log(wallsize) + 2 как центрование
+# повышение score за T-слова по закону log2(Twords) - log(wallsize) + 2 как эмпирическое центрование
 selected$score <- selected$score + log2(selected$Twords + 1) - log10(selected$wallsize + 1) + 2
-### вывод таблицы
+## вывод таблицы
 # write.table(selected, 'data/HTS.tab', quote = T, sep = '\t', row.names = F, col.names = T)
 
 
-### Получение дополнительного скоринга для правильно идеологических
+## Получение дополнительной награды score для правильно идеологических
+## не сработает нормально для распространённых вариантов
+# инициализировать колонку для наличия/отсутствия награды
 selected$RiId <- 0
+# цикл по правильным идеологическим терминам для поля religion
 for (ideo in ideology) {
-  # загрузка файла
+	# обращение к методу users.search с полями sex = <нужный пол>, religon = <идеологический термин>, count = 1000 (для максимизации вывода) и токен
+	# вывод в файл /tmp/ideo-reward.txt
   download.file(url = paste0('https://api.vk.com/method/users.search?sex=', gender[[sex]], '&religion=', ideo, '&count=1000', '&access_token=', token), destfile = '/tmp/ideo-reward.txt', method='wget', quiet = F)
-  # парсинг JSON
+	# парсинг JSON файла и извлечение данных
   tmp <- fromJSON(file = '/tmp/ideo-reward.txt')$response
-  # преобразование в вектор uid
+	# преобразование в вектор uid
   tmp[[1]] <- NULL
   tmp <- sapply(tmp, function(x) unlist(x))['uid',]
-  # увеличение Score, величина награды 5
+	# увеличение score для нашедшихся в полученном списке пользователей из главного data frame
   selected[selected$uid %in% tmp,]$score <- selected[selected$uid %in% tmp,]$score + 5
-  # задание метки правильной идеологии RiId
+	# задание метки детектированной правильной идеологии RiId как увеличение на 1
   selected[selected$uid %in% tmp,]$RiId <- selected[selected$uid %in% tmp,]$RiId + 1
 }
 
-### Получение тем и комментариев в Т-группах #
-# ~~~~~~~~ #
-# ~~~~~~~~ #
+## Получение тем и комментариев в Т-группах #
+# исполнение внешнего скрипта захвата активности в Т-группах
+# он должен быть полностью переписан
 source(file = 'WSS/CaptureGroupActivity.R')
-# ~~~~~~~~ #
 # ~~~~~~~~ #
 # увеличение Score: + ntopic и 1 + ln(ncomm + 1)
 selected$score <- selected$score + selected$ntopics + round(log(selected$ncomm + 1), 1)
 
 
-# сохранение результатов
+# сохранение результатов в табличный файл
 write.table(file='data/HTS.tab', x=selected, sep='\t', row.names=F, col.names=T, quote=T)
 
-### загрузка фоток
-# ~~~~~~~~ #
-# ~~~~~~~~ #
+## загрузка фоток
+# исполнение внешнего скрипта скачивания и раскладывания по папкам до N фоток из альбома фотографий профиля
 source(file = 'WSS/PhotoCapture.R')
 # ~~~~~~~~ #
-# ~~~~~~~~ #
 
+# сохранить "образ" - все переменные, функции и проч.
 save.image(file = '.RData')
 
-### функция вывода данных
+#------------------------------------------------------------------------------#
+## функция вывода данных по uid
 userdata <- function(cand) {
+	# выбрать строку с таким uid
   v <- selected[selected$uid == cand,]
+	# вывести uid
   print(v)
+	# вывести все коменты из разела хранилища 'comments'
   print(CorrData[['comments']][[paste0('id', cand)]])
-  CorrData[['groups']][[paste0('id', cand)]]
+	# вывести все группы из разела хранилища 'groups'
+  print(CorrData[['groups']][[paste0('id', cand)]])
 #   CorrData[['wall']][[paste0('id', cand)]]
 }
 
-### компактный вывод
+# компактный вывод топа из 20 по score с отсечением непараметрических колонок
 head(selected[order(selected$score, decreasing = T), c('uid','first_name','last_name','age','T','R','N','S','I','score','Twords','RiId','ntopics','ncomm')], 20)
 
 
