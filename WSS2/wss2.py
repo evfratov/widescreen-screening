@@ -1,17 +1,30 @@
 # -*- coding: utf-8 -*-
+#!/usr/env/python
 
-import vk_api # https://github.com/python273/vk_api/
-import argparse # парсинг аргументов командной строки
+import argparse # парсинг коммандной строки
 import time # задержка
+import vk_api # https://github.com/python273/vk_api/
+import pandas # pandas для работы с данными
 
 # Задержка между запросами в секундах
-# у меня все работает с нулевой задержкой.
-# Видимо, она есть в SDK.
-# Позже можно поменять
-SLEEP = 0
+SLEEP = 0.4
 
-# целевые группы
+# целевые группы, выведем в один из файлов входных данных
 GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
+# целевой пол
+SEX = 'F'
+# минимальный и максимальный возраст
+MIN_AGE = 22
+MAX_AGE = 28
+## значения отношений
+# 1 – single
+# 2 – in a relationship
+# 3 – engaged
+# 4 – married
+# 5 – it's complicated* может быть с кем-то
+# 6 – actively searching
+# 7 – in love
+
 
 # получение количества участников в группе
 def getMembersCount(vk, group):
@@ -23,12 +36,12 @@ def getMembersCount(vk, group):
 	membersCount = response[0]['members_count']
 	return membersCount
 
-# получение списка участников группы с определённым оффсетом		
+# получение блока списка участников группы с определённым оффсетом		
 def getMembersInGroup(vk, group, offset):
 	values = {
 		'group_id': group,
 		'offset': offset,
-		'fields': 'sex,bdate,city,country,last_seen,relation'
+		'fields': 'sex, bdate, city, country, last_seen, relation'
 	}
 	response = vk.method('groups.getMembers', values)
 	return response['items']
@@ -36,49 +49,102 @@ def getMembersInGroup(vk, group, offset):
 def work(vk):
 	allMembers = []	
 	for group in GROUPS:
-		# пауза перед запросом чтобы не забанили на vk
+		# пауза перед запросом чтобы не блочили метод
 		time.sleep(SLEEP)
 		
 		# запрос на получение количество членов в группе
-		# в принципе, можно получить количество участников
-		# одним запросом, но пока
-		# пусть всё будет как в оригинальной версии
 		membersCount = getMembersCount(vk, group)
-		stepSize = membersCount / 1000
-
-		# получаем всех членов групп, по тому же самому принципу,
-		# что и в изначальной версии
+		
+		# получаем всех членов групп по блокам в 1000 за раз
+		stepSize = int(membersCount / 1000)
 		for s in range(0, stepSize+1):
 			time.sleep(SLEEP)
 			offset = s * 1000
 			members = getMembersInGroup(vk, group, offset)
 			allMembers += members
-	
-	# тут это нужно всё загдать в датафрейм,
-	# пока просто вывожу количество
-	# TODO: загнать в датафрейм
+			
+	# контрольный вывод количества
 	print len(allMembers)
-		
-		
+	return allMembers
 
+# конверсия сырого списка пользователей в датафрейм
+# вместе с первичным процессингом списка
+def primaryFiltering(allMembers):
+	tempData = []
+	# конверсия в датафрейм
+	tempData = pandas.DataFrame.from_dict(allMembers)
+	
+	## удаление ненужного пола
+	# создание словаря с полами
+	genderList = {'NaN': 0, 'F': 1, 'M': 2}
+	# отбор строк только по подходящему полу
+	tempData = tempData[tempData.sex == genderList[SEX]]
+	# удаление уже не нужного столбца с полом
+	del tempData['sex']
+	
+	## удаление заблокированных
+	# удалить всех с не-NaN значением deactivated
+	tempData = tempData[pandas.isnull(tempData.deactivated)]
+	# удалить не нужную больше колонку deactivated
+	del tempData['deactivated']
+	
+	## удаление людей в отношениях - китайский говнокод, но лень
+	# удаление in a relationship
+	tempData = tempData[tempData.relation != 2]
+	# удаление engaged
+	tempData = tempData[tempData.relation != 3]
+	# удаление married
+	tempData = tempData[tempData.relation != 4]
+	# удаление in love
+	tempData = tempData[tempData.relation != 7]
+	# удаление тех, у кого есть кто-то в relation_partner - редкость
+	tempData = tempData[pandas.isnull(tempData.relation_partner)]
+	# удаление не нужной больше колонки про relation_partner
+	del tempData['relation_partner']
+	# заполнение значений NaN в поле relation нулями для удобства
+	tempData.relation = tempData.relation.fillna(0)
+	
+	## нормализация полей city, country и last_seen
+	# извлечение названия городов и стран, срока последнего посещения
+	tempData.city.loc[:][pandas.notnull(tempData.city.loc[:])] = tempData.city.loc[:][pandas.notnull(tempData.city.loc[:])].apply(lambda x: x['title'])
+	tempData.country.loc[:][pandas.notnull(tempData.country.loc[:])] = tempData.country.loc[:][pandas.notnull(tempData.country.loc[:])].apply(lambda x: x['title'])
+	tempData.last_seen = tempData.last_seen.apply(lambda x: x['time'])
+	tempData.last_seen = pandas.to_datetime(tempData['last_seen'], unit = 's')
+	# замещение NaN нулями городов и стран
+	tempData.city = tempData.city.fillna(0)
+	tempData.country = tempData.country.fillna(0)
+	
+	# здесь должна быть конвертация last_seen в нормальный формат дат,
+	# вычитание из неё сегодняшнего времени и отсечение всех с большим сроком неактивности
+	
+	# здесь должно быть вычисление коэффициента трушности
+	
+	return tempData
+
+### мастер-функция
 def main():
 	# парсинг аргументов командной строки
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--login", action="store")
-    parser.add_argument("--password", action="store")
-    args = parser.parse_args()
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--login", action="store")
+	parser.add_argument("--password", action="store")
+	args = parser.parse_args()
+	
+	login, password = args.login, args.password
+	
+	# TODO: нормально получать токен и не передавать логин с паролем
+	try:
+		vk = vk_api.VkApi(login, password)  # Авторизируемся
+	except vk_api.AuthorizationError as error_msg:
+		print(error_msg)  # В случае ошибки выведем сообщение
+	return  # и выйдем
+	
+	# получение списка пользователей
+	allMembers = work(vk)
+	# пред-обработка и конверсия списка в первичную таблицу кандидаток
+	primaryCandidatsTable = primaryFiltering(allMembers)
+	fl = open ('/home/evfr/primaryCandidats.csv', 'w')
+	primaryCandidatsTable.to_csv(fl)
 
-    login, password = args.login, args.password
-
-	# логин, судя по всему, с использованием логина и пароля,
-	# access_token не нужен
-    try:
-        vk = vk_api.VkApi(login, password)  # Авторизируемся
-    except vk_api.AuthorizationError as error_msg:
-        print(error_msg)  # В случае ошибки выведем сообщение
-        return  # и выйдем
-                
-    work(vk)
-
+# исполнение мастер-функции
 if __name__ == '__main__':
     main()
