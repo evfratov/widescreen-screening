@@ -127,20 +127,32 @@ def primaryFiltering(allMembers):
 	## пересчёт полных дат рождения в возраст и фильтрация	
 	# заполнение нулями NaN значений
 	tempData.bdate = tempData.bdate.fillna(0)
-	# написать функцию с полным процессингом дат без разделения датафреймов ??
-	# отбор полных возрастов в суб-датафрейм и конверсия в формат дат
-	tempDataFullbdates = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 7]
-	tempDataFullbdates.bdates = tempDataFullbdates.bdates.convert_objects(convert_dates = 'coerce')
+	# инициализация поля возраста
+	tempData['age'] = 0
+	# отбор полных возрастов в суб-датафреймы
+	tempDataFullbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 7]
+	tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
+	# конверсия в формат дат
+	tempDataFullbdate.bdate = tempDataFullbdate.bdate.convert_objects(convert_dates = 'coerce')
 	# вычисление возраста и фильтрация
-	tempDataFullbdates['age'] = tempDataFullbdates.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1)))
-	tempDataFullbdates = tempDataFullbdates[tempDataFullbdates.age >= MIN_AGE]
-	tempDataFullbdates = tempDataFullbdates[tempDataFullbdates.age <= MAX_AGE]
-		
+	tempDataFullbdate['age'] = tempDataFullbdate.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1))
+	tempDataFullbdate = tempDataFullbdate[tempDataFullbdate.age >= MIN_AGE]
+	tempDataFullbdate = tempDataFullbdate[tempDataFullbdate.age <= MAX_AGE]
+	# слияние в обратно в целый датафрейм
+	tempData = tempDataStrictbdate.append(tempDataFullbdate)
 	
+	## вычисление Т-коэффициента и удаление дубликатов
+	# чистый от дубликатов датафрейм
+	finalData = tempData.drop_duplicates()	
+	# вычисление Tcoeff
+	TcoeffData = tempData.id.value_counts()
+	TcoeffData = TcoeffData.to_frame(name = 'Tcoeff')
+	# сортировка и объединение в конечный датафрейм
+	finalData = finalData.sort('id')	
+	TcoeffData = TcoeffData.sort_index()
+	finalData['Tcoeff'] = TcoeffData.values
 	
-	# здесь должно быть вычисление коэффициента трушности
-	
-	return tempData
+	return finalData
 
 ### мастер-функция
 def main():
@@ -164,7 +176,8 @@ def main():
 	# пред-обработка и конверсия списка в первичную таблицу кандидаток
 	primaryCandidatsTable = primaryFiltering(allMembers)
 	fl = open ('/tmp/primaryCandidats.csv', 'w')
-	primaryCandidatsTable.to_csv(fl)
+	primaryCandidatsTable.to_csv(fl, index = False, sep = '\t')
+	fl.close()
 
 # исполнение мастер-функции
 if __name__ == '__main__':
