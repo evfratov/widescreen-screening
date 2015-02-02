@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #!/usr/env/python
 
-import argparse # парсинг коммандной строки
+import sys # парсинг коммандной строки
 import time # задержка
 import vk_api # https://github.com/python273/vk_api/
 import pandas # pandas для работы с данными
@@ -49,6 +49,7 @@ def getMembersInGroup(vk, group, offset):
 	response = vk.method('groups.getMembers', values)
 	return response['items']
 
+# получение сырого списка участников всех групп
 def work(vk):
 	allMembers = []	
 	for group in GROUPS:
@@ -154,31 +155,70 @@ def primaryFiltering(allMembers):
 	
 	return finalData
 
+# учёт файла-базы для RAE
+def RAEaccounting(primaryCandidatsTable):
+	dataFile = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/RAE_database.tab', sep = ';', index_col = False)
+	
+	
+	return
+
+# поиск пользователей по имени-фамилии с лимитами возраста для RAE
+def RAESearch(vk, candidate):
+	# формирование запроса и функции для поиска
+	query = candidate.first_name + ' ' + candidate.last_name
+	values = {
+		'q': query,
+		'count': 1000,
+		'age_from': MIN_AGE,
+		'age_to': MAX_AGE
+	}
+	# большой тайм-аут потому что метод блочат легко
+	time.sleep(8)
+	response = vk.method ('users.search', values)
+	# выполнение поиска и парсинг
+	result = False
+	if response['count'] > 0 :
+		result = int(candidate.id) in map(lambda x: x['id'], response['items'])
+	else:
+		result = False
+	# возвращение результата +- и информирующий вывод
+	if result:
+		print 'For ID ' + str(candidate.id) + ' age in range.'
+	else:
+		print 'For ID ' + str(candidate.id) + ' age unmatch.'
+	return result	
+
 # реверсивная оценка возраста в случае урезанной даты рождения
 def reverseAgeEstimate(primaryCandidatsTable):
 	tempData = primaryCandidatsTable
+	finalData = pandas.DataFrame()
 	# отбор пользователей с урезанными, но указанными датами
 	tempData = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 2]
 	tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
-	# 
-	for uid in tempDataStrictbdate.id:
-		###
-	
+	# цикл проверки присутствия в результатах поиска
+	for n in range(len (tempDataStrictbdate)):
+		candidate = tempDataStrictbdate.iloc[n]
+		if(RAESearch(candidate)):
+			# установить условный возраст как минимум - 1
+			candidate['age'] = MIN_AGE - 1
+			finalData = finalData.append(candidate)
+	## сборка полного датафрейма обратно
+	# набор пустых возрастов
+	tempData = primaryCandidatsTable[primaryCandidatsTable.bdate.apply(lambda x: len(str(x))) == 1]
+	# набор полных возрастов
+	tempData = tempData.append(primaryCandidatsTable[primaryCandidatsTable.bdate.apply(lambda x: len(str(x))) > 6])
+	# сборка и возвращение датафрейма
+	finalData = finalData.append(tempData)
 	return finalData
 
 ### мастер-функция
 def main():
 	# парсинг аргументов командной строки
-	parser = argparse.ArgumentParser()
-	parser.add_argument("--login", action="store")
-	parser.add_argument("--password", action="store")
-	args = parser.parse_args()
-	
-	login, password = args.login, args.password
+	login, password = sys.argv[0], sys.argv[1]
 	
 	# TODO: нормально получать токен и не передавать логин с паролем
 	try:
-		vk = vk_api.VkApi(login, password)  # Авторизируемся
+		vk = vk_api().VkApi(login, password)  # Авторизируемся
 	except vk_api.AuthorizationError as error_msg:
 		print(error_msg)  # В случае ошибки выведем сообщение
 	return  # и выйдем
@@ -189,7 +229,7 @@ def main():
 	primaryCandidatsTable = primaryFiltering(allMembers)
 	# вывод первичной таблицы в файл
 	fl = open ('/tmp/primaryCandidats.csv', 'w')
-	primaryCandidatsTable.to_csv(fl, index = False, sep = '\t')
+	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	# реверсивная оценка возраста
 #	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable)
