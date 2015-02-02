@@ -10,6 +10,10 @@ import datetime # для работы с датами
 # Задержка между запросами в секундах
 SLEEP = 0.4
 
+# парсинг аргументов командной строки
+#token_value = sys.argv[1]
+token_value = '0e0bd9f39307fad3774d2eb94c17f29e600ae3845deaba2b4be154fabc0cf398a03fca830aefde907aa7d'
+
 # целевые группы, выведем в один из файлов входных данных
 GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
 # целевой пол
@@ -37,6 +41,7 @@ def getMembersCount(vk, group):
 	}
 	response = vk.method('groups.getById', values)
 	membersCount = response[0]['members_count']
+	print ' Group ' + str(group) + ' has ' + str(membersCount) + ' members.'
 	return membersCount
 
 # получение блока списка участников группы с определённым оффсетом		
@@ -64,11 +69,12 @@ def work(vk):
 		for s in range(0, stepSize+1):
 			time.sleep(SLEEP)
 			offset = s * 1000
+			print ' Get ' + str(offset) + ' users for grpoup' + str(group)
 			members = getMembersInGroup(vk, group, offset)
 			allMembers += members
 			
 	# контрольный вывод количества
-	print len(allMembers)
+	print ' Totally captured ' + str(len(allMembers)) + ' members.'
 	return allMembers
 
 # конверсия сырого списка пользователей в датафрейм
@@ -83,12 +89,15 @@ def primaryFiltering(allMembers):
 	genderList = {'NaN': 0, 'F': 1, 'M': 2}
 	# отбор строк только по подходящему полу
 	tempData = tempData[tempData.sex == genderList[SEX]]
+	print ' Deleted unmatch gender, left ' + str(len(tempData))
 	# удаление уже не нужного столбца с полом
 	del tempData['sex']
+	
 	
 	## удаление заблокированных
 	# удалить всех с не-NaN значением deactivated
 	tempData = tempData[pandas.isnull(tempData.deactivated)]
+	print ' Deleted deactivated users, left ' + str(len(tempData))
 	# удалить не нужную больше колонку deactivated
 	del tempData['deactivated']
 	
@@ -104,6 +113,7 @@ def primaryFiltering(allMembers):
 	# удаление тех, у кого есть кто-то в relation_partner - редкость
 	tempData = tempData[pandas.isnull(tempData.relation_partner)]
 	# удаление не нужной больше колонки про relation_partner
+	print ' Deleted users in a relationship, left ' + str(len(tempData))
 	del tempData['relation_partner']
 	# заполнение значений NaN в поле relation нулями для удобства
 	tempData.relation = tempData.relation.fillna(0)
@@ -123,6 +133,7 @@ def primaryFiltering(allMembers):
 	tempData.last_seen = pandas.to_datetime(tempData['last_seen'], unit = 's')
 	# вычисление последнего срока и фильтрация
 	tempData = tempData[tempData.last_seen.apply(lambda x: (datetime.datetime.today() - x).days) <= LAST_SEEN]
+	print ' Deleted inactive users, left ' + str(len(tempData))
 	del tempData['last_seen']
 	
 	## пересчёт полных дат рождения в возраст и фильтрация	
@@ -141,6 +152,7 @@ def primaryFiltering(allMembers):
 	tempDataFullbdate = tempDataFullbdate[tempDataFullbdate.age <= MAX_AGE]
 	# слияние в обратно в целый датафрейм
 	tempData = tempDataStrictbdate.append(tempDataFullbdate)
+	print ' Deleted unmatch aged users, left ' + str(len(tempData))
 	
 	## вычисление Т-коэффициента и удаление дубликатов
 	# чистый от дубликатов датафрейм
@@ -152,20 +164,38 @@ def primaryFiltering(allMembers):
 	finalData = finalData.sort('id')	
 	TcoeffData = TcoeffData.sort_index()
 	finalData['Tcoeff'] = TcoeffData.values
+	print ' Stats for T-coefficient:'
+	print finalData.Tcoeff.value_counts()
 	
 	return finalData
 
-# учёт файла-базы для RAE
-def RAEaccounting(primaryCandidatsTable):
+# учёт файла-базы для RAE удаление range == False и присвоение возраста MAX-1 для True
+def RAEaccounting(tempDataStrictbdate):
+	# прочитать файл-базу с +- результатами поиска
 	dataFile = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/RAE_database.tab', sep = ';', index_col = False)
+	print ' In RAEbase ' +  str(len(dataFile)) + ' users'
+	# получить индекс в главном датафрейме всех из базы
+	index = tempDataStrictbdate.id.isin(dataFile.id)
+	print ' ' + str(index.sum()) + ' are known'
+	# отделить пользователей в базе
+	InBase = tempDataStrictbdate[index]
+	# и пользователей не в базе
+	notInBase = tempDataStrictbdate[index == False]
+	print ' ' + str(len(notInBase)) + ' in residue'
+	# отбор из базы только подходящих из проверенных
+	InBase = InBase[InBase.id.isin(dataFile.id[dataFile.range == True])]
+	print ' Matched by age ' + str(len(InBase))
+	# присвоение суб-порогового возраста для подходящих
+	InBase.age = MIN_AGE - 1
+	# сборка финального датафрейма (проверенные + не из базы) для вывода	
+	tempDataStrictbdate = InBase.append(notInBase)
 	
-	
-	return
+	return tempDataStrictbdate
 
 # поиск пользователей по имени-фамилии с лимитами возраста для RAE
 def RAESearch(vk, candidate):
 	# формирование запроса и функции для поиска
-	query = candidate.first_name + ' ' + candidate.last_name
+	query = str(candidate.first_name) + ' ' + str(candidate.last_name)
 	values = {
 		'q': query,
 		'count': 1000,
@@ -183,9 +213,9 @@ def RAESearch(vk, candidate):
 		result = False
 	# возвращение результата +- и информирующий вывод
 	if result:
-		print 'For ID ' + str(candidate.id) + ' age in range.'
+		print ' For ID ' + str(candidate.id) + ' age in range'
 	else:
-		print 'For ID ' + str(candidate.id) + ' age unmatch.'
+		print ' For ID ' + str(candidate.id) + ' age unmatch'
 	return result	
 
 # реверсивная оценка возраста в случае урезанной даты рождения
@@ -195,13 +225,24 @@ def reverseAgeEstimate(primaryCandidatsTable):
 	# отбор пользователей с урезанными, но указанными датами
 	tempData = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 2]
 	tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
+	# учёт базы данных RAE для tempDataStrictbdate
+	tempDataStrictbdate = RAEaccounting(tempDataStrictbdate)
 	# цикл проверки присутствия в результатах поиска
 	for n in range(len (tempDataStrictbdate)):
 		candidate = tempDataStrictbdate.iloc[n]
-		if(RAESearch(candidate)):
-			# установить условный возраст как минимум - 1
-			candidate['age'] = MIN_AGE - 1
-			finalData = finalData.append(candidate)
+		# проверка на наличие в базе по суб-пороговому возрасту
+		if(candidate.age != (MIN_AGE - 1)):
+			# выполнение поиска
+			print '	Searching of ' + str(candidate.id) + ' user...'
+			result = RAESearch(vk, candidate)
+			# интерпретация при положительном результате
+			if(result):
+				# установить условный возраст как минимум - 1
+				candidate['age'] = MIN_AGE - 1
+				finalData = finalData.append(candidate)
+				print '	Match'
+			else:
+				print '	Unmatch'
 	## сборка полного датафрейма обратно
 	# набор пустых возрастов
 	tempData = primaryCandidatsTable[primaryCandidatsTable.bdate.apply(lambda x: len(str(x))) == 1]
@@ -209,31 +250,26 @@ def reverseAgeEstimate(primaryCandidatsTable):
 	tempData = tempData.append(primaryCandidatsTable[primaryCandidatsTable.bdate.apply(lambda x: len(str(x))) > 6])
 	# сборка и возвращение датафрейма
 	finalData = finalData.append(tempData)
+	
 	return finalData
 
 ### мастер-функция
 def main():
-	# парсинг аргументов командной строки
-	login, password = sys.argv[0], sys.argv[1]
-	
-	# TODO: нормально получать токен и не передавать логин с паролем
-	try:
-		vk = vk_api().VkApi(login, password)  # Авторизируемся
-	except vk_api.AuthorizationError as error_msg:
-		print(error_msg)  # В случае ошибки выведем сообщение
-	return  # и выйдем
+	# получение доступа к методам через токен
+	vk = vk_api.VkApi(token = token_value, app_id = 4315528)
 	
 	# получение списка пользователей
 	allMembers = work(vk)
 	# пред-обработка и конверсия списка в первичную таблицу кандидаток
 	primaryCandidatsTable = primaryFiltering(allMembers)
 	# вывод первичной таблицы в файл
-	fl = open ('/tmp/primaryCandidats.csv', 'w')
+	fl = open ('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv', 'w')
 	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	# реверсивная оценка возраста
-#	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable)
-	
+	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable)
+	# 
+	return RAEcandidatsList
 
 # исполнение мастер-функции
 if __name__ == '__main__':

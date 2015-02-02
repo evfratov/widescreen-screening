@@ -16,7 +16,7 @@ MIN_AGE = 22
 MAX_AGE = 28
 
 # получение доступа к методам
-vk = vk_api.VkApi(token = '5d6cf6357e32b7293aa5bda5e9f6923659f1ba506fd4f7c2029fc4cddc4a9f8d188c02f7ed530f280b566')
+vk = vk_api.VkApi(token = '0e0bd9f39307fad3774d2eb94c17f29e600ae3845deaba2b4be154fabc0cf398a03fca830aefde907aa7d', app_id = 4315528)
 
 # поиск пользователей по имени-фамилии с лимитами возраста для RAE
 def RAESearch(candidate):
@@ -45,7 +45,7 @@ def RAESearch(candidate):
 	return result	
 
 # чтение первичного списка кандидаток
-primaryData = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv', sep = ';', index_col = False)
+primaryData = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv')
 tempData = primaryData
 finalData = pandas.DataFrame()
 # отбор пользователей с урезанными, но указанными датами
