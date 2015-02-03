@@ -11,8 +11,7 @@ import datetime # для работы с датами
 SLEEP = 0.4
 
 # парсинг аргументов командной строки
-#token_value = sys.argv[1]
-token_value = '0e0bd9f39307fad3774d2eb94c17f29e600ae3845deaba2b4be154fabc0cf398a03fca830aefde907aa7d'
+token_value = sys.argv[1]
 
 # целевые группы, выведем в один из файлов входных данных
 GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
@@ -69,7 +68,7 @@ def work(vk):
 		for s in range(0, stepSize+1):
 			time.sleep(SLEEP)
 			offset = s * 1000
-			print ' Get ' + str(offset) + ' users for grpoup' + str(group)
+			print ' Get users for grpoup' + str(group) + ' with offset ' + str(offset)
 			members = getMembersInGroup(vk, group, offset)
 			allMembers += members
 			
@@ -80,7 +79,6 @@ def work(vk):
 # конверсия сырого списка пользователей в датафрейм
 # вместе с первичным процессингом списка
 def primaryFiltering(allMembers):
-	tempData = []
 	# конверсия в датафрейм
 	tempData = pandas.DataFrame.from_dict(allMembers)
 	
@@ -120,8 +118,8 @@ def primaryFiltering(allMembers):
 	
 	## нормализация полей city и country
 	# извлечение названия городов и стран, срока последнего посещения
-	tempData.city.loc[:][pandas.notnull(tempData.city.loc[:])] = tempData.city.loc[:][pandas.notnull(tempData.city.loc[:])].apply(lambda x: x['title'])
-	tempData.country.loc[:][pandas.notnull(tempData.country.loc[:])] = tempData.country.loc[:][pandas.notnull(tempData.country.loc[:])].apply(lambda x: x['title'])
+	tempData.loc[pandas.notnull(tempData.city.loc[:]), 'city'] = tempData.loc[pandas.notnull(tempData.city.loc[:]), 'city'].apply(lambda x: x['title'])
+	tempData.loc[pandas.notnull(tempData.country.loc[:]), 'country'] = tempData.loc[pandas.notnull(tempData.country.loc[:]), 'country'].apply(lambda x: x['title'])
 	# замещение NaN нулями городов и стран
 	tempData.city = tempData.city.fillna(0)
 	tempData.country = tempData.country.fillna(0)
@@ -140,14 +138,14 @@ def primaryFiltering(allMembers):
 	# заполнение нулями NaN значений
 	tempData.bdate = tempData.bdate.fillna(0)
 	# инициализация поля возраста
-	tempData['age'] = 0
+	tempData.loc[:, 'age'] = 0
 	# отбор полных возрастов в суб-датафреймы
 	tempDataFullbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 7]
 	tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
 	# конверсия в формат дат
 	tempDataFullbdate.bdate = tempDataFullbdate.bdate.convert_objects(convert_dates = 'coerce')
 	# вычисление возраста и фильтрация
-	tempDataFullbdate['age'] = tempDataFullbdate.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1))
+	tempDataFullbdate.loc[:, 'age'] = tempDataFullbdate.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1))
 	tempDataFullbdate = tempDataFullbdate[tempDataFullbdate.age >= MIN_AGE]
 	tempDataFullbdate = tempDataFullbdate[tempDataFullbdate.age <= MAX_AGE]
 	# слияние в обратно в целый датафрейм
@@ -156,14 +154,15 @@ def primaryFiltering(allMembers):
 	
 	## вычисление Т-коэффициента и удаление дубликатов
 	# чистый от дубликатов датафрейм
-	finalData = tempData.drop_duplicates()	
+	finalData = tempData.drop_duplicates()
+	print ' Deleted duplicated users, left ' + str(len(finalData))
 	# вычисление Tcoeff
 	TcoeffData = tempData.id.value_counts()
 	TcoeffData = TcoeffData.to_frame(name = 'Tcoeff')
 	# сортировка и объединение в конечный датафрейм
 	finalData = finalData.sort('id')	
 	TcoeffData = TcoeffData.sort_index()
-	finalData['Tcoeff'] = TcoeffData.values
+	finalData.loc[:, 'Tcoeff'] = TcoeffData.values
 	print ' Stats for T-coefficient:'
 	print finalData.Tcoeff.value_counts()
 	
@@ -186,7 +185,7 @@ def RAEaccounting(tempDataStrictbdate):
 	InBase = InBase[InBase.id.isin(dataFile.id[dataFile.range == True])]
 	print ' Matched by age ' + str(len(InBase))
 	# присвоение суб-порогового возраста для подходящих
-	InBase.age = MIN_AGE - 1
+	InBase.loc[:, 'age'] = MIN_AGE - 1
 	# сборка финального датафрейма (проверенные + не из базы) для вывода	
 	tempDataStrictbdate = InBase.append(notInBase)
 	
@@ -219,7 +218,7 @@ def RAESearch(vk, candidate):
 	return result	
 
 # реверсивная оценка возраста в случае урезанной даты рождения
-def reverseAgeEstimate(primaryCandidatsTable):
+def reverseAgeEstimate(primaryCandidatsTable, vk):
 	tempData = primaryCandidatsTable
 	finalData = pandas.DataFrame()
 	# отбор пользователей с урезанными, но указанными датами
@@ -227,22 +226,26 @@ def reverseAgeEstimate(primaryCandidatsTable):
 	tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
 	# учёт базы данных RAE для tempDataStrictbdate
 	tempDataStrictbdate = RAEaccounting(tempDataStrictbdate)
-	# цикл проверки присутствия в результатах поиска
-	for n in range(len (tempDataStrictbdate)):
-		candidate = tempDataStrictbdate.iloc[n]
-		# проверка на наличие в базе по суб-пороговому возрасту
-		if(candidate.age != (MIN_AGE - 1)):
-			# выполнение поиска
-			print '	Searching of ' + str(candidate.id) + ' user...'
-			result = RAESearch(vk, candidate)
-			# интерпретация при положительном результате
-			if(result):
-				# установить условный возраст как минимум - 1
-				candidate['age'] = MIN_AGE - 1
-				finalData = finalData.append(candidate)
-				print '	Match'
-			else:
-				print '	Unmatch'
+	# проверка на необходимость RAE-поиска для не из базы
+	if (len(tempDataStrictbdate) > 0):
+		# цикл проверки присутствия в результатах поиска
+		for n in range(len (tempDataStrictbdate)):
+			candidate = tempDataStrictbdate.iloc[n]
+			# проверка на наличие в базе по суб-пороговому возрасту
+			if(candidate.age != (MIN_AGE - 1)):
+				# выполнение поиска
+				print '	Searching of ' + str(candidate.id) + ' user...'
+				result = RAESearch(vk, candidate)
+				# интерпретация при положительном результате
+				if(result):
+					# установить условный возраст как минимум - 1
+					candidate.loc['age'] = MIN_AGE - 1
+					finalData = finalData.append(candidate)
+					print '	Match'
+				else:
+					print '	Unmatch'
+	else: 
+		print ' RAEdb up to date! nobody for RAEsearch'
 	## сборка полного датафрейма обратно
 	# набор пустых возрастов
 	tempData = primaryCandidatsTable[primaryCandidatsTable.bdate.apply(lambda x: len(str(x))) == 1]
@@ -267,7 +270,7 @@ def main():
 	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	# реверсивная оценка возраста
-	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable)
+	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable, vk)
 	# 
 	return RAEcandidatsList
 

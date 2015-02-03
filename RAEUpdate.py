@@ -16,7 +16,8 @@ MIN_AGE = 22
 MAX_AGE = 28
 
 # получение доступа к методам
-vk = vk_api.VkApi(token = '0e0bd9f39307fad3774d2eb94c17f29e600ae3845deaba2b4be154fabc0cf398a03fca830aefde907aa7d', app_id = 4315528)
+token_value = sys.argv[1]
+vk = vk_api.VkApi(token = token_value, app_id = 4315528)
 
 # поиск пользователей по имени-фамилии с лимитами возраста для RAE
 def RAESearch(candidate):
@@ -45,19 +46,21 @@ def RAESearch(candidate):
 	return result	
 
 # чтение первичного списка кандидаток
-primaryData = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv')
+primaryData = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv', sep = ';', index_col = False)
 tempData = primaryData
+print ' Read primary data: ' + str(len(tempData)) + ' users'
 finalData = pandas.DataFrame()
 # отбор пользователей с урезанными, но указанными датами
 tempData = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 2]
 tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
+print ' For searching: ' + str(len(tempDataStrictbdate)) + ' users'
 # цикл проверки присутствия в результатах поиска и вывод в файл
 fl = open('Dropbox/evfr/MAIN/LSS/branch_two/RAE_database.tab', 'w')
 fl.write("id;range\n")
 for n in range(len (tempDataStrictbdate)):
 	candidate = tempDataStrictbdate.iloc[n]
 	res = RAESearch(candidate)
-	print str(candidate.id) + ";" + str(res)
+#	print str(candidate.id) + ";" + str(res)
 	fl.write(str(candidate.id) + ";" + str(res) + "\n")
 
 fl.close()
