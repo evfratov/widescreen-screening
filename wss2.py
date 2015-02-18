@@ -7,7 +7,7 @@ import vk_api # https://github.com/python273/vk_api/
 import numpy # для вычислений
 import pandas # pandas для работы с данными
 import datetime # для работы с датами
-import matplotlib.pyplot as plt # для графики
+#import matplotlib.pyplot as plt # для графики
 
 # Задержка между запросами в секундах
 SLEEP = 0.4
@@ -15,11 +15,11 @@ SLEEP = 0.4
 # парсинг аргументов командной строки
 token_value = sys.argv[1]
 
-# целевые группы, выведем в один из файлов входных данных
-GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
+# целевые группы
+#GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
+GROUPS_LIST = "Dropbox/evfr/MAIN/LSS/branch_two/groupsDB_B2.txt"
 # целевой пол
 SEX = 'F'
-
 # минимальный и максимальный возраст
 MIN_AGE = 22
 MAX_AGE = 28
@@ -38,6 +38,11 @@ MAX_FOLLOWERS = 1000
 # 6 – actively searching
 # 7 – in love
 
+# чтение файла с группами
+def readGroups(GROUPS_LIST):
+	with open(GROUPS_LIST) as fl:
+		GROUPS = fl.read().splitlines()
+	return GROUPS
 
 # получение количества участников в группе
 def getMembersCount(vk, group):
