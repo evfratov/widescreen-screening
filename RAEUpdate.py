@@ -31,6 +31,7 @@ def RAESearch(candidate):
 	}
 	# большой тайм-аут потому что метод блочат легко
 	time.sleep(8)
+	print "\t" + query
 	response = vk.method('users.search', values)
 	# выполнение поиска и парсинг
 	result = False
