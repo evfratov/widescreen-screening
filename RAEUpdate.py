@@ -15,6 +15,11 @@ import pandas # pandas для работы с данными
 MIN_AGE = 22
 MAX_AGE = 28
 
+# рабочая папка
+#WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_two/'
+WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_one/'
+
+
 # получение доступа к методам
 token_value = sys.argv[1]
 vk = vk_api.VkApi(token = token_value, app_id = 4315528)
@@ -47,7 +52,7 @@ def RAESearch(candidate):
 	return result	
 
 # чтение первичного списка кандидаток
-primaryData = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv', sep = ';', index_col = False)
+primaryData = pandas.DataFrame.from_csv((WORK_DIR + 'primaryCandidats.csv'), sep = ';', index_col = False)
 tempData = primaryData
 print ' Read primary data: ' + str(len(tempData)) + ' users'
 finalData = pandas.DataFrame()
@@ -56,7 +61,7 @@ tempData = tempData[tempData.bdate.apply(lambda x: len(str(x))) > 2]
 tempDataStrictbdate = tempData[tempData.bdate.apply(lambda x: len(str(x))) < 7]
 print ' For searching: ' + str(len(tempDataStrictbdate)) + ' users'
 # цикл проверки присутствия в результатах поиска и вывод в файл
-fl = open('Dropbox/evfr/MAIN/LSS/branch_two/RAE_database.tab', 'w')
+fl = open((WORK_DIR + 'RAE_database.tab'), 'w')
 fl.write("id;range\n")
 for n in range(len (tempDataStrictbdate)):
 	candidate = tempDataStrictbdate.iloc[n]

@@ -7,7 +7,7 @@ import vk_api # https://github.com/python273/vk_api/
 import numpy # для вычислений
 import pandas # pandas для работы с данными
 import datetime # для работы с датами
-import matplotlib.pyplot as plt # для графики
+#import matplotlib.pyplot as plt # для графики
 
 # Задержка между запросами в секундах
 SLEEP = 0.4
@@ -17,7 +17,11 @@ token_value = sys.argv[1]
 
 # целевые группы
 #GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
-GROUPS_LIST = "Dropbox/evfr/MAIN/LSS/branch_two/groupsDB_B2.txt"
+WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_two/'
+#WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_one/'
+#GROUPS_LIST = 'Dropbox/evfr/MAIN/LSS/branch_two/groupsDB_B2.txt'
+GROUPS_LIST = WORK_DIR + 'groupsDB_B2.txt'
+TFREND_LIST = WORK_DIR + 'Tfriends_list-Vk.tab'
 # целевой пол
 SEX = 'F'
 # минимальный и максимальный возраст
@@ -187,7 +191,7 @@ def primaryFiltering(allMembers):
 # учёт файла-базы для RAE удаление range == False и присвоение возраста MAX-1 для True
 def RAEaccounting(tempDataStrictbdate):
 	# прочитать файл-базу с +- результатами поиска
-	dataFile = pandas.DataFrame.from_csv('Dropbox/evfr/MAIN/LSS/branch_two/RAE_database.tab', sep = ';', index_col = False)
+	dataFile = pandas.DataFrame.from_csv( (WORK_DIR + 'RAE_database.tab'), sep = ';', index_col = False)
 	print ' In RAEbase ' +  str(len(dataFile)) + ' users'
 	# получить индекс в главном датафрейме всех из базы
 	index = tempDataStrictbdate.id.isin(dataFile.id)
@@ -367,6 +371,23 @@ def captureFrinds(candidatsList, vk):
 	
 	return (candidatsList, tempData)
 
+# запрос списка ID Т-френдов по именам из фалйа
+def getI_ID(vk):
+	# чтение списка имён Т-френдов
+	rawTFrends = readGroups(TFREND_LIST)
+	# запрос выдачи данных пользователей
+	values = {
+		'user_ids': ','.join(rawTFrends)
+	}
+	# пауза
+	time.sleep(SLEEP)
+	response = vk.method('users.get', values)
+	# преобразование в датафрейм с извлечением только ID
+	TidList = pandas.DataFrame.from_dict(response)['id']
+	# конверсия в массив чисел
+	TidList = TidList.values
+	
+	return TidList
 
 ### мастер-функция
 def main():
@@ -378,7 +399,7 @@ def main():
 	# пред-обработка и конверсия списка в первичную таблицу кандидаток
 	primaryCandidatsTable = primaryFiltering(allMembers)
 	# вывод первичной таблицы в файл
-	fl = open ('Dropbox/evfr/MAIN/LSS/branch_two/primaryCandidats.csv', 'w')
+	fl = open ( (WORK_DIR + 'primaryCandidats.csv'), 'w')
 	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	
@@ -392,7 +413,7 @@ def main():
 	# подсчёт, получение и процессинг списка друзей в хранилище данных
 	candidatsList, dataBase['friends'] = captureFrinds(candidatsList, vk)
 	# сохранение результатов
-	fl = open ('Dropbox/evfr/MAIN/LSS/branch_two/candidatsList.csv', 'w')
+	fl = open ((WORK_DIR + 'candidatsList.csv'), 'w')
 	candidatsList.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	
