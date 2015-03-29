@@ -17,7 +17,7 @@ token_value = sys.argv[1]
 
 # целевые группы
 #GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
-WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_two/'
+WORK_DIR = 'Dropbox/evfr/LSS/branch_two/'
 #WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_one/'
 #GROUPS_LIST = 'Dropbox/evfr/MAIN/LSS/branch_two/groupsDB_B2.txt'
 GROUPS_LIST = WORK_DIR + 'groupsDB_B2.txt'
@@ -322,7 +322,6 @@ def countGroupsFollowers(RAEcandidatsList, vk):
 def captureFrinds(candidatsList, vk):
 	# инициализация новых колонок
 	candidatsList['friends'] = 0
-	candidatsList['Tfriends'] = 0
 	candidatsList['Svalue'] = 0
 	candidatsList['Mage'] = 0
 	# инициализация хранилища данных друзей
@@ -336,7 +335,6 @@ def captureFrinds(candidatsList, vk):
 			'count': 1000,
 			'fields': 'sex,bdate'
 			}
-		print values
 		# пауза
 		time.sleep(SLEEP)
 		# запрос списка друзей
@@ -346,13 +344,13 @@ def captureFrinds(candidatsList, vk):
 			candidatsList.friends.iloc[n] = response['count']
 			# преобразование в датафрейм
 			temp = pandas.DataFrame.from_dict(response['items'])
+			del temp['online']
+			# сохранение списка друзей в хранилище
+			tempData[int(candidate.id)] = temp
+			# подсчёт доли целевого пола в друзьях
+			candidatsList.Svalue.iloc[n] = sum(temp.sex == genderList[SEX]) / len(temp)
 			# проверка на наличие даты рождения
 			if ('bdate' in list(temp.columns)):
-				del temp['online']
-				# сохранение списка друзей в хранилище
-				tempData[int(candidate.id)] = temp
-				# подсчёт доли целевого пола в друзьях
-				candidatsList.Svalue.iloc[n] = sum(temp.sex == genderList[SEX]) / len(temp)
 				# отбор друзей с полным возрастом	
 				tempFullbdate = temp[temp.bdate.apply(lambda x: len(str(x))) > 7]
 				if len(tempFullbdate) > 0:
@@ -389,6 +387,24 @@ def getI_ID(vk):
 	
 	return TidList
 
+# подсчёт числа Т-френдов
+def Tfriends_counting(candidatsList, TidList, dataBase):
+	# инициализация новой колонки
+	candidatsList['Tfriends'] = 0
+	# перебор всех пользователей
+	for n in range(len(candidatsList)):
+		# получение id
+		uid = int(candidatsList.iloc[n].id)
+		if (candidatsList.iloc[n].friends > 0):
+			# получение Т-друзей пользователя
+			overlapFreinds = set(TidList) & set(dataBase['friends'][uid].id.values)
+			# подсчёт и сохранение
+			candidatsList.Tfriends.iloc[n] = len(overlapFreinds)
+	print 'Tfriends	Number'
+	print candidatsList.Tfriends.value_counts()
+	
+	return candidatsList
+
 ### мастер-функция
 def main():
 	# получение доступа к методам через токен
@@ -403,7 +419,7 @@ def main():
 	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	
-	### реверсивная оценка возраста
+	### реверсивная оценка возраста, иногда обновлять RAE-DB
 	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable, vk)
 	
 	# инициализация хранилища данных
@@ -412,7 +428,14 @@ def main():
 	candidatsList, dataBase['groups'] = countGroupsFollowers(RAEcandidatsList, vk)
 	# подсчёт, получение и процессинг списка друзей в хранилище данных
 	candidatsList, dataBase['friends'] = captureFrinds(candidatsList, vk)
-	# сохранение результатов
+	
+	### определение числа Т-френдов
+	# получение списка Т-френдов
+	TidList = getI_ID(vk)
+	# подсчёт
+	candidatsList = Tfriends_counting(candidatsList, TidList, dataBase)
+	
+	# сохранение результатов - смещать по мере написания
 	fl = open ((WORK_DIR + 'candidatsList.csv'), 'w')
 	candidatsList.to_csv(fl, index = False, sep = ';')
 	fl.close()

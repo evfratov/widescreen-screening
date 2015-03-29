@@ -16,8 +16,8 @@ MIN_AGE = 22
 MAX_AGE = 28
 
 # рабочая папка
-#WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_two/'
-WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_one/'
+WORK_DIR = 'Dropbox/evfr/LSS/branch_two/'
+#WORK_DIR = 'Dropbox/evfr/LSS/branch_one/'
 
 
 # получение доступа к методам
