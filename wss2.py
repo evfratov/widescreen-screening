@@ -7,6 +7,8 @@ import vk_api # https://github.com/python273/vk_api/
 import numpy # для вычислений
 import pandas # pandas для работы с данными
 import datetime # для работы с датами
+import pickle # для сохранения данных
+import scipy
 #import matplotlib.pyplot as plt # для графики
 
 # Задержка между запросами в секундах
@@ -22,6 +24,8 @@ WORK_DIR = 'Dropbox/evfr/LSS/branch_two/'
 #GROUPS_LIST = 'Dropbox/evfr/MAIN/LSS/branch_two/groupsDB_B2.txt'
 GROUPS_LIST = WORK_DIR + 'groupsDB_B2.txt'
 TFREND_LIST = WORK_DIR + 'Tfriends_list-Vk.tab'
+BLACK_LIST = WORK_DIR + 'BlackList.tab'
+DATA_FOLDER = 'dataLSS/'
 # целевой пол
 SEX = 'F'
 # минимальный и максимальный возраст
@@ -96,11 +100,22 @@ def work(vk):
 ## создание словаря с полами
 genderList = {'NaN': 0, 'F': 1, 'M': 2}
 
+# применение фильтра с чёрным списком
+def blackListFilter(tempData, BLACK_LIST):
+	# чтение файла чёрного списка
+	blackListData = pandas.read_csv(BLACK_LIST, sep = '\t')
+	# вычитание ID чёрного листа из первичной таблицы
+	tempData = tempData[tempData.id.isin(set(tempData.id.values) - set(blackListData.uid.values))]
+	return tempData
+
 # конверсия сырого списка пользователей в датафрейм
 # вместе с первичным процессингом списка
 def primaryFiltering(allMembers):
 	# конверсия в датафрейм
 	tempData = pandas.DataFrame.from_dict(allMembers)
+	
+	# применение фильтра чёрного списка
+	tempData = blackListFilter(tempData, BLACK_LIST)
 	
 	## удаление ненужного пола
 	# отбор строк только по подходящему полу
@@ -187,6 +202,7 @@ def primaryFiltering(allMembers):
 	print finalData.Tcoeff.value_counts()
 	
 	return finalData
+
 
 # учёт файла-базы для RAE удаление range == False и присвоение возраста MAX-1 для True
 def RAEaccounting(tempDataStrictbdate):
@@ -277,7 +293,7 @@ def reverseAgeEstimate(primaryCandidatsTable, vk):
 	return finalData
 
 # получение числа групп и подписчиков
-def countGroupsFollowers(RAEcandidatsList, vk):
+def countGroupsFollowers(RAEcandidatsList, vk, DATA_FOLDER):
 	# инициализация новых колонок
 	RAEcandidatsList['groups'] = 0
 	RAEcandidatsList['followers'] = 0
@@ -294,36 +310,55 @@ def countGroupsFollowers(RAEcandidatsList, vk):
 		# пауза
 		time.sleep(SLEEP)
 		# запрос количества групп
-		response = vk.method('groups.get', values)
+		try:
+			response = vk.method('groups.get', values)
+		except:
+			response = {'count': 0}
 		# запись результата количества групп
 		RAEcandidatsList.groups.iloc[n] = response['count']
-		# запись списка групп для пользователя с преобразованием ответа в датафрейм
-		tempData[int(candidate.id)] = pandas.DataFrame.from_dict(response['items'])
-		# запрос числа подписчиков
-		values = {
-			'user_id': int(candidate.id),
-			'count': 1
-		}
-		time.sleep(SLEEP)
-		# запись во временные данные
-		response = vk.method('users.getFollowers', values)
-		RAEcandidatsList.followers.iloc[n] = response['count']
+		# проверка на превышение максимального значения числа групп
+		if (RAEcandidatsList.groups.iloc[n] < MAX_GROUPS):
+			# запись списка групп для пользователя с преобразованием ответа в датафрейм
+			tempData[int(candidate.id)] = pandas.DataFrame.from_dict(response['items'])
+			# запрос числа подписчиков, только если число групп не превышено
+			values = {
+				'user_id': int(candidate.id),
+				'count': 1
+				}
+			time.sleep(SLEEP)
+			# запись во временные данные
+			try:
+				response = vk.method('users.getFollowers', values)
+			except:
+				response = {'count': 0}
+			RAEcandidatsList.followers.iloc[n] = response['count']
+			if (RAEcandidatsList.groups.iloc[n] >= MAX_GROUPS):
+				# удаление из базы данных списки групп пользователей со слишком большим числом подписчиков
+				del tempData[int(candidate.id)]
 		# диагностический вывод
 		print ' For ' + str(int(candidate.id)) + ' groups: ' + str(RAEcandidatsList.iloc[n]['groups']) + ' followers: ' + str(RAEcandidatsList.iloc[n]['followers'])
+	
 	# удаление пользователей со слишком большим числом групп и подписчиков
 	print ' Removed ' + str(sum(RAEcandidatsList.groups > MAX_GROUPS)) + ' users with too many groups'
 	RAEcandidatsList = RAEcandidatsList[RAEcandidatsList.groups <= MAX_GROUPS]
-	print ' Removed ' + str(sum(RAEcandidatsList.followers > MAX_GROUPS)) + ' users with too many followers'
-	RAEcandidatsList = RAEcandidatsList[RAEcandidatsList.followers<= MAX_GROUPS]
+	print ' Removed ' + str(sum(RAEcandidatsList.followers > MAX_FOLLOWERS)) + ' users with too many followers'
+	RAEcandidatsList = RAEcandidatsList[RAEcandidatsList.followers <= MAX_FOLLOWERS]
+	
+	# вывод данных о группах в txt-pkl файл 
+	with open ((DATA_FOLDER + 'dataGroups.pkl'), 'w') as datafl:
+		pickle.dump(tempData, datafl)
 	
 	return (RAEcandidatsList, tempData)
 
 # получение списка друзей с подсчётом числа в главной таблице и выводом хранилища данных с данными френдов
-def captureFrinds(candidatsList, vk):
+def captureFrinds(candidatsList, vk, DATA_FOLDER):
 	# инициализация новых колонок
 	candidatsList['friends'] = 0
 	candidatsList['Svalue'] = 0
-	candidatsList['Mage'] = 0
+	candidatsList['MedianAge'] = 0
+	candidatsList['ModeAge'] = 0
+	candidatsList['MeanAge'] = 0
+	candidatsList['SDAge'] = 0
 	# инициализация хранилища данных друзей
 	tempData = {}
 	# перебор по всем пользователям
@@ -338,10 +373,13 @@ def captureFrinds(candidatsList, vk):
 		# пауза
 		time.sleep(SLEEP)
 		# запрос списка друзей
-		response = vk.method('friends.get', values)
+		try:
+			response = vk.method('friends.get', values)
+		except:
+			response = {'count': 0}
+		# запись результата числа друзей
+		candidatsList.friends.iloc[n] = response['count']
 		if (response['count'] > 0 ) & (response['count'] <= MAX_FRIENDS):
-			# запись результата числа друзей
-			candidatsList.friends.iloc[n] = response['count']
 			# преобразование в датафрейм
 			temp = pandas.DataFrame.from_dict(response['items'])
 			del temp['online']
@@ -353,19 +391,30 @@ def captureFrinds(candidatsList, vk):
 			if ('bdate' in list(temp.columns)):
 				# отбор друзей с полным возрастом	
 				tempFullbdate = temp[temp.bdate.apply(lambda x: len(str(x))) > 7]
-				if len(tempFullbdate) > 0:
+				if len(tempFullbdate) > 3:
 					# силовая конверсия в возраст
 					tempFullbdate.loc[:, 'bdate'] = pandas.to_datetime(tempFullbdate.bdate, coerce = True)
 					# удаление некорректных дат
 					tempFullbdate = tempFullbdate[tempFullbdate.bdate.notnull()]
-					# вычисление медианного возраста
-					Mage = numpy.median(tempFullbdate.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1)))
-					candidatsList.Mage.iloc[n] = Mage
+					# повторная проверка
+					if len(tempFullbdate) > 3:
+						friendsAges = tempFullbdate.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1))
+						# вычисление медианного возраста
+						candidatsList.MedianAge.iloc[n] = numpy.median(friendsAges)
+						# вычисление среднего возраста
+						candidatsList.MeanAge.iloc[n] = numpy.mean(friendsAges)
+						# вычисление моды возраста
+						candidatsList.ModeAge.iloc[n] = scipy.stats.mode(friendsAges)[0][0]
+						# вычисление SD
+						candidatsList.SDAge.iloc[n] = numpy.std(friendsAges)
 		# диагностический вывод
-		print ' For ' + str(int(candidate.id)) + ' ' + str(candidatsList.friends.iloc[n]) + ' friends ' + 'Svalue ' + str(round(candidatsList.Svalue.iloc[n], 2)) + ' Mage ' + str(round(candidatsList.Mage.iloc[n], 2))
+		print ' For ' + str(int(candidate.id)) + ' ' + str(candidatsList.friends.iloc[n]) + ' friends ' + 'Svalue ' + str(round(candidatsList.Svalue.iloc[n], 2)) + ' ModeAge ' + str(round(candidatsList.ModeAge.iloc[n], 2))
 	# удаление пользователей со слишком большим числом друзей
 	print ' Deleted ' + str(sum(candidatsList.friends > MAX_FRIENDS)) + ' users who have too many frinds'
 	candidatsList = candidatsList[candidatsList.friends <= MAX_FRIENDS]
+	# вывод данных о группах в pkl файл 
+	with open ((DATA_FOLDER + 'dataFriends.pkl'), 'w') as datafl:
+		pickle.dump(tempData, datafl)
 	
 	return (candidatsList, tempData)
 
@@ -419,15 +468,15 @@ def main():
 	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	
-	### реверсивная оценка возраста, иногда обновлять RAE-DB
+	### реверсивная оценка возраста, иногда обновлять RAE-DB - RAEUpdate.py
 	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable, vk)
 	
 	# инициализация хранилища данных
 	dataBase = {}
 	# получение числа и числа подписчиков
-	candidatsList, dataBase['groups'] = countGroupsFollowers(RAEcandidatsList, vk)
+	candidatsList, dataBase['groups'] = countGroupsFollowers(RAEcandidatsList, vk, DATA_FOLDER)
 	# подсчёт, получение и процессинг списка друзей в хранилище данных
-	candidatsList, dataBase['friends'] = captureFrinds(candidatsList, vk)
+	candidatsList, dataBase['friends'] = captureFrinds(candidatsList, vk, DATA_FOLDER)
 	
 	### определение числа Т-френдов
 	# получение списка Т-френдов
