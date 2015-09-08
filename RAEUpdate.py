@@ -13,7 +13,7 @@ import pandas # pandas для работы с данными
 
 # минимальный и максимальный возраст
 MIN_AGE = 22
-MAX_AGE = 28
+MAX_AGE = 35
 
 # рабочая папка
 WORK_DIR = 'Dropbox/evfr/LSS/branch_two/'
@@ -36,8 +36,13 @@ def RAESearch(candidate):
 	}
 	# большой тайм-аут потому что метод блочат легко
 	time.sleep(8)
-	print "\t" + query
-	response = vk.method('users.search', values)
+	try:
+		print "\t" + query
+		response = vk.method('users.search', values)
+	except:
+		print "repeat\t" + query
+		time.sleep(8)
+		response = vk.method('users.search', values)
 	# выполнение поиска и парсинг
 	result = False
 	if response['count'] > 0 :

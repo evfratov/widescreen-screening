@@ -8,35 +8,35 @@ import numpy # для вычислений
 import pandas # pandas для работы с данными
 import datetime # для работы с датами
 import pickle # для сохранения данных
-import scipy
+import re # для подсчёта Т-слов
 #import matplotlib.pyplot as plt # для графики
-
-# Задержка между запросами в секундах
-SLEEP = 0.4
 
 # парсинг аргументов командной строки
 token_value = sys.argv[1]
 
+# Задержка между запросами в секундах
+SLEEP = 0.4
 # целевые группы
 #GROUPS = [25438516, 10672563] # https://vk.com/androiddevelopers https://vk.com/appledev
 WORK_DIR = 'Dropbox/evfr/LSS/branch_two/'
 #WORK_DIR = 'Dropbox/evfr/MAIN/LSS/branch_one/'
-#GROUPS_LIST = 'Dropbox/evfr/MAIN/LSS/branch_two/groupsDB_B2.txt'
 GROUPS_LIST = WORK_DIR + 'groupsDB_B2.txt'
 TFREND_LIST = WORK_DIR + 'Tfriends_list-Vk.tab'
 BLACK_LIST = WORK_DIR + 'BlackList.tab'
+KEYWORDS_LIST = 'Dropbox/evfr/LSS/keyWords.txt'
 DATA_FOLDER = 'dataLSS/'
 # целевой пол
 SEX = 'F'
 # минимальный и максимальный возраст
 MIN_AGE = 22
-MAX_AGE = 28
+MAX_AGE = 35
 # срок последней активности в днях
 LAST_SEEN = 50
 # максимальное число групп, друзей и подписчиков
 MAX_FRIENDS = 1000
 MAX_GROUPS = 1000
 MAX_FOLLOWERS = 1000
+MAX_WALL = 20000
 ## значения отношений
 # 1 – single
 # 2 – in a relationship
@@ -51,6 +51,12 @@ def readGroups(GROUPS_LIST):
 	with open(GROUPS_LIST) as fl:
 		groups = fl.read().splitlines()
 	return groups
+
+# чтение файла с Т-словами
+def readKeywords(KEYWORDS_LIST):
+	with open(KEYWORDS_LIST) as fl:
+		keyWords = fl.read().decode('utf-8').splitlines()
+	return keyWords
 
 # получение количества участников в группе
 def getMembersCount(vk, group):
@@ -80,10 +86,8 @@ def work(vk):
 	for group in groups:
 		# пауза перед запросом чтобы не блочили метод
 		time.sleep(SLEEP)
-		
 		# запрос на получение количество членов в группе
 		membersCount = getMembersCount(vk, group)
-		
 		# получаем всех членов групп по блокам в 1000 за раз
 		stepSize = int(membersCount / 1000)
 		for s in range(0, stepSize+1):
@@ -92,7 +96,6 @@ def work(vk):
 			print ' Get users for grpoup ' + str(group) + ' with offset ' + str(offset)
 			members = getMembersInGroup(vk, group, offset)
 			allMembers += members
-			
 	# контрольный вывод количества
 	print ' Totally captured ' + str(len(allMembers)) + ' members.'
 	return allMembers
@@ -123,7 +126,6 @@ def primaryFiltering(allMembers):
 	print ' Deleted unmatch gender, left ' + str(len(tempData))
 	# удаление уже не нужного столбца с полом
 	del tempData['sex']
-	
 	
 	## удаление заблокированных
 	# удалить всех с не-NaN значением deactivated
@@ -251,6 +253,7 @@ def RAESearch(vk, candidate):
 		print ' For ID ' + str(candidate.id) + ' age in range'
 	else:
 		print ' For ID ' + str(candidate.id) + ' age unmatch'
+	
 	return result	
 
 # реверсивная оценка возраста в случае урезанной даты рождения
@@ -356,9 +359,6 @@ def captureFrinds(candidatsList, vk, DATA_FOLDER):
 	candidatsList['friends'] = 0
 	candidatsList['Svalue'] = 0
 	candidatsList['MedianAge'] = 0
-	candidatsList['ModeAge'] = 0
-	candidatsList['MeanAge'] = 0
-	candidatsList['SDAge'] = 0
 	# инициализация хранилища данных друзей
 	tempData = {}
 	# перебор по всем пользователям
@@ -401,16 +401,10 @@ def captureFrinds(candidatsList, vk, DATA_FOLDER):
 						friendsAges = tempFullbdate.bdate.apply(lambda x: round((datetime.datetime.today() - x).days/365, 1))
 						# вычисление медианного возраста
 						candidatsList.MedianAge.iloc[n] = numpy.median(friendsAges)
-						# вычисление среднего возраста
-						candidatsList.MeanAge.iloc[n] = numpy.mean(friendsAges)
-						# вычисление моды возраста
-						candidatsList.ModeAge.iloc[n] = scipy.stats.mode(friendsAges)[0][0]
-						# вычисление SD
-						candidatsList.SDAge.iloc[n] = numpy.std(friendsAges)
 		# диагностический вывод
-		print ' For ' + str(int(candidate.id)) + ' ' + str(candidatsList.friends.iloc[n]) + ' friends ' + 'Svalue ' + str(round(candidatsList.Svalue.iloc[n], 2)) + ' ModeAge ' + str(round(candidatsList.ModeAge.iloc[n], 2))
+		print ' For ' + str(int(candidate.id)) + ' ' + str(candidatsList.friends.iloc[n]) + ' friends ' + 'Svalue ' + str(round(candidatsList.Svalue.iloc[n], 2)) 
 	# удаление пользователей со слишком большим числом друзей
-	print ' Deleted ' + str(sum(candidatsList.friends > MAX_FRIENDS)) + ' users who have too many frinds'
+	print ' Deleted ' + str(sum(candidatsList.friends > MAX_FRIENDS)) + ' users who have too many friends'
 	candidatsList = candidatsList[candidatsList.friends <= MAX_FRIENDS]
 	# вывод данных о группах в pkl файл 
 	with open ((DATA_FOLDER + 'dataFriends.pkl'), 'w') as datafl:
@@ -454,6 +448,125 @@ def Tfriends_counting(candidatsList, TidList, dataBase):
 	
 	return candidatsList
 
+# определение размера стены
+def wallCount_users(candidatsList, vk):
+	# инициализация переменной размера стен
+	candidatsList['Wsize'] = 0
+	# получение размера стен
+	for n in range(len(candidatsList)):
+		candidate = int(candidatsList.iloc[n].id)
+		# формирование запроса для определения размера стены
+		values = {
+			'owner_id' : candidate,
+			'count' : 1,
+			'filter' : 'all'
+		}
+		# исполнение запроса и извлечение размера
+		wsize = 0
+		try:
+			time.sleep(SLEEP)
+			response = vk.method('wall.get', values)
+			wsize = int(response['count'])
+			candidatsList.Wsize.iloc[n] = wsize
+		except:
+			candidatsList.Wsize.iloc[n] = 0
+		print str(candidate), '\tsize\t', wsize
+	# удаление всех с огромной стеной
+	print ' Deleted ' + str(len(candidatsList[candidatsList.Wsize >= MAX_WALL])) + ' users with a gaint wall'
+	candidatsList = candidatsList[candidatsList.Wsize < MAX_WALL] 
+	
+	return candidatsList
+
+def wallCapture(candidatsList, vk):
+	# размер шага в постах за раз
+	stepSize = 80
+	# инициализация блока базы данных для текстов стен
+	tempDBblock = {}
+	# перебор всех пользователей
+	for n in range(len(candidatsList)):
+		candidate = candidatsList.iloc[n]
+		# счётчик постов
+		counter = 0
+		# запрос размера стены
+		wsize = candidate.Wsize
+		if wsize > 0:
+			print ' capture ' + str(int(candidate.id)) + ' with wall size ' + str(int(wsize))
+			# блочное прохождение
+			for k in range(0, int(ceil(wsize / stepSize))):
+				# формирование запроса
+				values = {
+					'owner_id' : candidate.id,
+					'count' : stepSize,
+					'offset' : stepSize * k,
+					'filter' : 'all'
+					}
+				# исполнение
+				try:
+					time.sleep(SLEEP)
+					print '\t' + str(int(candidate.id)) + ' in stage ' + str(round(values['offset'] * 100 / wsize, 1)) + '%'
+					response = vk.method('wall.get', values)
+				except:
+					print ' Repeat for ' + str(int(candidate.id)) + ' in stage ' + str(round(values['offset'] * 100 / wsize, 1)) + '%'
+					time.sleep(SLEEP)
+					response = vk.method('wall.get', values)
+				### парсинг
+				# выбор только данных
+				temp = response['items']
+				# перебор по всем записям
+				tempDBblock[str(int(candidate.id))] = []
+				for i in range(0, len(temp)):
+					# извлечение текста
+					posttext = temp[i]['text']
+					# проверка наличия текста
+					if len(posttext) > 0:
+						# сохранение в блок данных
+						tempDBblock[str(int(candidate.id))].append(posttext)
+						counter = counter + 1
+			# диагностический вывод
+			print '\tfor ID ' + str(int(candidate.id)) + ' ' + str(counter) + ' textes'
+	# вывод данных стен в pkl файл
+	with open ((DATA_FOLDER + 'dataWalls.pkl'), 'w') as datafl:
+		pickle.dump(tempDBblock, datafl)
+	
+	return tempDBblock
+
+# подсчёт Т-слов
+def countTwords(candidatsList, dataBasePart):
+	# чтение ключевых слов из файла
+	keyWords = readKeywords(KEYWORDS_LIST)
+	# инициализация числа Т-слов
+	candidatsList['Twords'] = 0
+	# перебор по всем пользователям главного списка
+	for n in range(len(candidatsList)):
+		candidate = candidatsList.iloc[n]
+		ids = int(candidate.id)
+		# print ' Look over ' + str(ids)
+		# инициализация счётчика Т-слов
+		count = 0
+		# выбор данных пользователя
+		if dataBasePart.has_key(str(ids)):
+			temp = dataBasePart[str(ids)]
+			# перебор по всем записям пользователя
+			for k in range(0, len(temp)):
+				# print temp[k]
+				# перебор всех ключевых слов
+				for w in range(0, len(keyWords)):
+					# компиляция выражения
+					stemWord = re.compile(keyWords[w], flags = re.U + re.I)
+					# поиск в корня посте и подсчёт встречаемости
+					ress = stemWord.findall(temp[k])
+					result = len(ress)
+					# if result > 0:
+					# 	print ress[0]
+					count = count + result
+		print '\tFor id ' + str(ids) + ' ' + str(count)
+		candidatsList.Twords.iloc[n] = count
+	print ' Stats for T-words:'
+	print candidatsList.Twords.value_counts()
+	
+	return candidatsList
+
+
 ### мастер-функция
 def main():
 	# получение доступа к методам через токен
@@ -468,21 +581,33 @@ def main():
 	primaryCandidatsTable.to_csv(fl, index = False, sep = ';')
 	fl.close()
 	
-	### реверсивная оценка возраста, иногда обновлять RAE-DB - RAEUpdate.py
+	### реверсивная оценка возраста, иногда обновлять RAE-DB с помощью RAEUpdate.py
 	RAEcandidatsList = reverseAgeEstimate(primaryCandidatsTable, vk)
 	
 	# инициализация хранилища данных
 	dataBase = {}
-	# получение числа и числа подписчиков
+	# получение числа подписчиков и списков групп
 	candidatsList, dataBase['groups'] = countGroupsFollowers(RAEcandidatsList, vk, DATA_FOLDER)
-	# подсчёт, получение и процессинг списка друзей в хранилище данных
+	# получение и анализ списков друзей
 	candidatsList, dataBase['friends'] = captureFrinds(candidatsList, vk, DATA_FOLDER)
 	
 	### определение числа Т-френдов
-	# получение списка Т-френдов
+	# чтение списка Т-френдов
 	TidList = getI_ID(vk)
-	# подсчёт
+	# подсчёт Т-френдов
 	candidatsList = Tfriends_counting(candidatsList, TidList, dataBase)
+	
+	### анализ стен кандидаток
+	# определение размера стен
+	candidatsList = wallCount_users(candidatsList, vk)
+	# захват текстов
+	dataBase['walls'] = wallCapture(candidatsList, vk)
+	# подсчёт Т-слов
+	candidatsList = countTwords(candidatsList, dataBase['walls'])
+	
+	### захват контента групп
+	# 
+	
 	
 	# сохранение результатов - смещать по мере написания
 	fl = open ((WORK_DIR + 'candidatsList.csv'), 'w')
